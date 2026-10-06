@@ -15,7 +15,7 @@ from backend.doorstep import (
     VisitProfile,
     score_unusual_hour,
 )
-from backend.store import PackageStatus, SQLiteStore
+from backend.store import PackageStatus
 
 REAL = datetime(2026, 10, 6, 8, 40, tzinfo=timezone.utc)
 PROFILE = VisitProfile(quiet_start_hour=22, quiet_end_hour=6, quiet_hour_prior=0.2,
@@ -45,10 +45,10 @@ def analysis(package=0.0, vehicle=0.0, person=0.0, frames=20, source="stub", vie
 
 
 @pytest.fixture
-def ds():
+def ds(store):  # parametrized over SQLite and DynamoDB (tests/conftest.py)
     clock = DemoClock(tz="Asia/Kolkata", real_now=lambda: REAL)
     clock.set(datetime(2026, 10, 6, 14, 10))
-    return Doorstep(SQLiteStore(":memory:"), clock, reminder_hours=3, profile=PROFILE)
+    return Doorstep(store, clock, reminder_hours=3, profile=PROFILE)
 
 
 def arrive(ds, event_id="e-pkg"):
