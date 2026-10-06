@@ -4,7 +4,10 @@ Package lifecycle (one open package at a time):
 
     present --(REMINDER_HOURS on the demo clock)--> reminded
     present | reminded --(resident presses "I picked it up")--> picked_up
-    present | reminded --(new capture shows no package, no pickup recorded)--> missing
+    present | reminded --(new capture of the SAME VIEW shows no package, no pickup recorded)--> missing
+
+A capture from a different camera view can't confirm or deny the package: it is recorded as
+"different view — can't verify package" and the package state is left unchanged.
 
 All times come from the demo clock (backend.clock), so a demo can skip ahead.
 """
@@ -23,6 +26,7 @@ from typing import Any
 from backend.clock import DemoClock, get_clock
 from backend.config import PROJECT_ROOT
 from backend.store import EventRecord, Notification, Package, PackageStatus, StateStore, get_store
+from backend.vision.fingerprint import compare_views, view_fingerprint
 
 logger = logging.getLogger("doorstep")
 
@@ -32,6 +36,13 @@ DEFAULT_REMINDER_HOURS = 3.0
 MIN_PRESENCE_FRACTION = 0.3
 # A capture with fewer frames is too short to conclude that a package is gone.
 MIN_FRAMES_FOR_ABSENCE = 3
+
+CHECK_NEW = "new package at the door"
+CHECK_PRESENT = "package still present (same view)"
+CHECK_GONE = "package gone from its arrival view"
+CHECK_DIFFERENT_VIEW = "different view — can't verify package"
+CHECK_NO_REFERENCE = "no reference view — can't verify package"
+CHECK_TOO_SHORT = "capture too short — can't verify package"
 SCORED_EVENT_TYPES = {"vehicle", "motion", "human", "other_motion"}
 PROFILE_PATH = PROJECT_ROOT / "config" / "visit_profile.json"
 
@@ -135,7 +146,8 @@ def observations(analysis: dict[str, Any] | None) -> dict[str, Any]:
     """Extract what we need from a step-3 analysis record."""
     if not analysis:
         return {"frame_count": 0, "package": False, "vehicle": False, "person": False,
-                "description_source": None, "accessible_description": None, "frame_source": None}
+                "description_source": None, "accessible_description": None, "frame_source": None,
+                "view": None}
     summary = (analysis.get("detections") or {}).get("summary", {})
     desc = analysis.get("description") or {}
 
@@ -150,13 +162,26 @@ def observations(analysis: dict[str, Any] | None) -> dict[str, Any]:
         "description_source": desc.get("source"),
         "accessible_description": (desc.get("result") or {}).get("accessible_description"),
         "frame_source": analysis.get("frame_source"),
+        "view": analysis.get("view_fingerprint") or _fingerprint_from_frames(analysis),
     }
+
+
+def _fingerprint_from_frames(analysis: dict[str, Any]) -> dict[str, Any] | None:
+    """For analyses saved before fingerprints existed: compute from the capture's frames."""
+    frames_dir = analysis.get("frames_dir")
+    if not frames_dir:
+        return None
+    path = Path(frames_dir)
+    if not path.is_absolute():
+        path = PROJECT_ROOT / path
+    return view_fingerprint(sorted(path.glob("frame_*.jpg")))
 
 
 @dataclass
 class EventOutcome:
     event: EventRecord
-    package_action: str | None = None  # created | still_present | missing | None
+    package_action: str | None = None  # created | still_present | missing | view_mismatch | None
+    view_check: dict[str, Any] | None = None
     package: Package | None = None
     unusual: UnusualScore | None = None
     notifications: list[Notification] = field(default_factory=list)
@@ -167,6 +192,7 @@ class EventOutcome:
             "package_action": self.package_action,
             "package": self.package.to_dict() if self.package else None,
             "unusual": self.unusual.__dict__ if self.unusual else None,
+            "view_check": self.view_check,
             "notifications": [n.to_dict() for n in self.notifications],
         }
 
@@ -231,33 +257,51 @@ class Doorstep:
             unusual_score=unusual.score if unusual else None,
             unusual_explanation=unusual.explanation if unusual else None,
         )
-        self.store.add_event(event)
         outcome = EventOutcome(event=event, unusual=unusual, notifications=list(reminders))
         obs_source = obs["description_source"] or "rules"
+        view = dict(obs["view"], device_id=device_id) if obs["view"] else None
 
         # package lifecycle
         open_pkg = self.store.open_package()
-        if obs["package"]:
-            if open_pkg:
-                open_pkg.last_seen_sim_ts = now.isoformat(timespec="seconds")
-                self.store.update_package(open_pkg)
-                outcome.package_action, outcome.package = "still_present", open_pkg
-            elif event_type == "package":
-                pkg = Package(
-                    id=_new_id("pkg"), status=PackageStatus.PRESENT, arrived_event_id=event_id,
-                    arrived_sim_ts=now.isoformat(timespec="seconds"), arrived_real_ts=real.isoformat(timespec="seconds"),
-                    last_seen_sim_ts=now.isoformat(timespec="seconds"),
-                )
-                self.store.create_package(pkg)
-                outcome.package_action, outcome.package = "created", pkg
-                outcome.notifications.append(self._notify(
-                    "resident", "package_arrived", f"A package was left at your door at {fmt_time(now)}.",
-                    event_id=event_id, source=obs_source, package_id=pkg.id,
-                ))
-        elif open_pkg and obs["frame_count"] >= MIN_FRAMES_FOR_ABSENCE:
-            open_pkg.status = PackageStatus.MISSING
-            open_pkg.resolved_sim_ts, open_pkg.resolved_event_id = now.isoformat(timespec="seconds"), event_id
+        check = None
+        if open_pkg and obs["frame_count"] > 0:
+            outcome.view_check = compare_views(open_pkg.arrival_view, view)
+        same_view = bool(outcome.view_check and outcome.view_check["match"])
+        cant_verify = CHECK_NO_REFERENCE if (outcome.view_check or {}).get("reason") == "no reference view" \
+            else CHECK_DIFFERENT_VIEW
+
+        if obs["package"] and not open_pkg and event_type == "package":
+            pkg = Package(
+                id=_new_id("pkg"), status=PackageStatus.PRESENT, arrived_event_id=event_id,
+                arrived_sim_ts=now.isoformat(timespec="seconds"), arrived_real_ts=real.isoformat(timespec="seconds"),
+                last_seen_sim_ts=now.isoformat(timespec="seconds"), arrival_view=view,
+            )
+            self.store.create_package(pkg)
+            check = CHECK_NEW
+            outcome.package_action, outcome.package = "created", pkg
+            outcome.notifications.append(self._notify(
+                "resident", "package_arrived", f"A package was left at your door at {fmt_time(now)}.",
+                event_id=event_id, source=obs_source, package_id=pkg.id,
+            ))
+        elif open_pkg and obs["frame_count"] == 0:
+            pass  # no capture: nothing to say about the package
+        elif open_pkg and not same_view:
+            check = cant_verify
+            outcome.package_action, outcome.package = "view_mismatch", open_pkg
+            logger.info("event %s: %s (package %s stays %s)", event_id, check, open_pkg.id, open_pkg.status.value)
+        elif open_pkg and obs["package"]:
+            open_pkg.last_seen_sim_ts = now.isoformat(timespec="seconds")
             self.store.update_package(open_pkg)
+            check = CHECK_PRESENT
+            outcome.package_action, outcome.package = "still_present", open_pkg
+        elif open_pkg and obs["frame_count"] < MIN_FRAMES_FOR_ABSENCE:
+            check = CHECK_TOO_SHORT
+        elif open_pkg:
+            open_pkg.status = PackageStatus.MISSING
+            open_pkg.resolved_sim_ts = now.isoformat(timespec="seconds")
+            open_pkg.resolved_event_id = event_id
+            self.store.update_package(open_pkg)
+            check = CHECK_GONE
             outcome.package_action, outcome.package = "missing", open_pkg
             arrived = datetime.fromisoformat(open_pkg.arrived_sim_ts)
             outcome.notifications.append(self._notify(
@@ -265,8 +309,12 @@ class Doorstep:
                 f"Possible missing package: a package left at the door at {fmt_time(arrived)} is no longer "
                 f"visible at {fmt_time(now)}, and the resident has not marked it as picked up. Please check in.",
                 event_id=event_id, source=obs_source, package_id=open_pkg.id,
-                extra={"arrived_sim_ts": open_pkg.arrived_sim_ts, "last_seen_sim_ts": open_pkg.last_seen_sim_ts},
+                extra={"arrived_sim_ts": open_pkg.arrived_sim_ts, "last_seen_sim_ts": open_pkg.last_seen_sim_ts,
+                       "view_check": outcome.view_check},
             ))
+
+        event.package_check = check
+        self.store.add_event(event)
 
         # unusual hour
         if unusual and unusual.score >= self.profile.unusual_threshold:

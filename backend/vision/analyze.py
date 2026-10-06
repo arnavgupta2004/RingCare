@@ -12,6 +12,7 @@ from typing import Any
 from backend.config import get_settings
 from backend.vision.describe import DescribeError, describe_scene, stub_description
 from backend.vision.detect import detect_frames
+from backend.vision.fingerprint import view_fingerprint
 
 logger = logging.getLogger("vision.analyze")
 
@@ -37,6 +38,7 @@ def analyze_event(event_id: str, event_type: str, frames_dir: Path, source: str 
     else:
         detections = detect_frames(frames)
         record["detections"] = detections
+        record["view_fingerprint"] = view_fingerprint(frames)
         try:
             record["description"] = describe_scene(frames, event_type, detections)
         except DescribeError as exc:

@@ -37,6 +37,9 @@ class EventRecord:
     accessible_description: str | None = None
     unusual_score: float | None = None
     unusual_explanation: str | None = None
+    # What this capture could say about the open package, e.g.
+    # "different view — can't verify package" (see doorstep.record_event)
+    package_check: str | None = None
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)
@@ -53,6 +56,9 @@ class Package:
     reminded_sim_ts: str | None = None
     resolved_sim_ts: str | None = None
     resolved_event_id: str | None = None
+    # Camera-view fingerprint of the arrival capture (backend.vision.fingerprint);
+    # only captures of the same view may mark this package missing.
+    arrival_view: dict[str, Any] | None = None
 
     def to_dict(self) -> dict[str, Any]:
         d = asdict(self)

@@ -27,7 +27,8 @@ CREATE TABLE IF NOT EXISTS events (
     description_source TEXT,
     accessible_description TEXT,
     unusual_score REAL,
-    unusual_explanation TEXT
+    unusual_explanation TEXT,
+    package_check TEXT
 );
 CREATE INDEX IF NOT EXISTS events_type_hour ON events (event_type, sim_hour);
 
@@ -40,7 +41,8 @@ CREATE TABLE IF NOT EXISTS packages (
     last_seen_sim_ts TEXT NOT NULL,
     reminded_sim_ts TEXT,
     resolved_sim_ts TEXT,
-    resolved_event_id TEXT
+    resolved_event_id TEXT,
+    arrival_view TEXT
 );
 CREATE INDEX IF NOT EXISTS packages_status ON packages (status);
 
@@ -61,6 +63,12 @@ CREATE TABLE IF NOT EXISTS notifications (
 
 _BOOL_EVENT_FIELDS = {"package_seen", "vehicle_seen", "person_seen"}
 
+# Columns added after the first release: (table, column, type). Applied to older databases on open.
+MIGRATIONS = [
+    ("events", "package_check", "TEXT"),
+    ("packages", "arrival_view", "TEXT"),
+]
+
 
 class SQLiteStore(StateStore):
     def __init__(self, path: Path | str):
@@ -71,6 +79,10 @@ class SQLiteStore(StateStore):
         self._lock = threading.Lock()
         with self._lock, self._conn:
             self._conn.executescript(SCHEMA)
+            for table, column, typ in MIGRATIONS:
+                existing = {r["name"] for r in self._conn.execute(f"PRAGMA table_info({table})")}
+                if column not in existing:
+                    self._conn.execute(f"ALTER TABLE {table} ADD COLUMN {column} {typ}")
 
     def _insert(self, table: str, row: dict, replace: bool = False) -> None:
         cols = ", ".join(row)
@@ -112,16 +124,23 @@ class SQLiteStore(StateStore):
 
     # --- packages ------------------------------------------------------------
 
+    @staticmethod
+    def _package_row(package: Package) -> dict:
+        row = package.to_dict()
+        row["arrival_view"] = json.dumps(row["arrival_view"]) if row["arrival_view"] is not None else None
+        return row
+
     def create_package(self, package: Package) -> None:
-        self._insert("packages", package.to_dict())
+        self._insert("packages", self._package_row(package))
 
     def update_package(self, package: Package) -> None:
-        self._insert("packages", package.to_dict(), replace=True)
+        self._insert("packages", self._package_row(package), replace=True)
 
     @staticmethod
     def _package(row: sqlite3.Row) -> Package:
         d = dict(row)
         d["status"] = PackageStatus(d["status"])
+        d["arrival_view"] = json.loads(d["arrival_view"]) if d.get("arrival_view") else None
         return Package(**d)
 
     def get_package(self, package_id: str) -> Package | None:

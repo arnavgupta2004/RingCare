@@ -3,7 +3,18 @@ from datetime import datetime, timezone
 import pytest
 
 from backend.clock import DemoClock
-from backend.doorstep import Doorstep, PackageStateError, VisitProfile, score_unusual_hour
+from backend.doorstep import (
+    CHECK_DIFFERENT_VIEW,
+    CHECK_GONE,
+    CHECK_NEW,
+    CHECK_NO_REFERENCE,
+    CHECK_PRESENT,
+    CHECK_TOO_SHORT,
+    Doorstep,
+    PackageStateError,
+    VisitProfile,
+    score_unusual_hour,
+)
 from backend.store import PackageStatus, SQLiteStore
 
 REAL = datetime(2026, 10, 6, 8, 40, tzinfo=timezone.utc)
@@ -11,12 +22,23 @@ PROFILE = VisitProfile(quiet_start_hour=22, quiet_end_hour=6, quiet_hour_prior=0
                        active_hour_prior=3.0, unusual_threshold=0.7)
 
 
-def analysis(package=0.0, vehicle=0.0, person=0.0, frames=20, source="stub"):
+def _view(phash, hist):
+    return {"version": 1, "device_id": None,
+            "frames": [{"frame": "frame_000.jpg", "phash": phash, "hist": hist, "size": [1280, 720]}]}
+
+
+# Two camera views far apart in both hash and histogram (see backend/vision/fingerprint.py).
+FRONT_DOOR = _view("0f0f0f0f0f0f0f0f", [float(i % 4 == 0) for i in range(32)])
+DRIVEWAY = _view("70f0f0f0f0f0f0f0", [float(i % 4 == 2) for i in range(32)])
+
+
+def analysis(package=0.0, vehicle=0.0, person=0.0, frames=20, source="stub", view=FRONT_DOOR):
     def g(frac):
         return {"max_count": int(frac > 0), "frames_present": [], "frame_fraction": frac, "best_confidence": 0.5}
     return {
         "frame_count": frames,
         "frame_source": "ring_whep",
+        "view_fingerprint": view,
         "detections": {"summary": {"package": g(package), "vehicle": g(vehicle), "person": g(person)}},
         "description": {"source": source, "result": {"accessible_description": "test"}},
     }
@@ -154,6 +176,65 @@ def test_short_or_missing_capture_does_not_mark_missing(ds, frames, an):
     arrive(ds)
     out = ds.record_event("e-short", "motion", analysis=an)
     assert out.package_action is None
+    assert ds.store.open_package().status is PackageStatus.PRESENT
+    assert out.event.package_check == (CHECK_TOO_SHORT if frames else None)
+
+
+# --- view matching (false-missing protection) ---------------------------------
+
+def test_arrival_stores_view_and_check(ds):
+    out = arrive(ds)
+    assert out.event.package_check == CHECK_NEW
+    assert ds.store.get_package(out.package.id).arrival_view["frames"][0]["phash"] == FRONT_DOOR["frames"][0]["phash"]
+
+
+def test_different_view_without_package_leaves_package_present(ds):
+    pkg = arrive(ds).package
+    ds.clock.advance(3600)
+    out = ds.record_event("e-veh", "vehicle", analysis=analysis(vehicle=0.9, view=DRIVEWAY))
+    assert out.package_action == "view_mismatch"
+    assert out.event.package_check == CHECK_DIFFERENT_VIEW == "different view — can't verify package"
+    assert out.view_check["match"] is False
+    stored = ds.store.get_package(pkg.id)
+    assert stored.status is PackageStatus.PRESENT and stored.resolved_event_id is None
+    assert ds.store.list_notifications("caregiver") == []
+    assert ds.store.get_event("e-veh").package_check == CHECK_DIFFERENT_VIEW
+
+
+def test_different_view_does_not_block_later_same_view_missing(ds):
+    pkg = arrive(ds).package
+    ds.record_event("e-veh", "vehicle", analysis=analysis(vehicle=0.9, view=DRIVEWAY))
+    out = ds.record_event("e-gone", "motion", analysis=analysis(package=0.0, view=FRONT_DOOR))
+    assert out.package_action == "missing" and out.event.package_check == CHECK_GONE
+    assert ds.store.get_package(pkg.id).status is PackageStatus.MISSING
+
+
+def test_package_seen_from_different_view_does_not_refresh_last_seen(ds):
+    pkg = arrive(ds).package
+    ds.clock.advance(3600)
+    out = ds.record_event("e-other", "motion", analysis=analysis(package=0.9, view=DRIVEWAY))
+    assert out.package_action == "view_mismatch"
+    assert ds.store.get_package(pkg.id).last_seen_sim_ts == pkg.last_seen_sim_ts
+
+
+def test_same_view_with_package_refreshes_last_seen(ds):
+    arrive(ds)
+    ds.clock.advance(3600)
+    out = ds.record_event("e-again", "motion", analysis=analysis(package=0.9))
+    assert out.package_action == "still_present" and out.event.package_check == CHECK_PRESENT
+
+
+def test_package_without_reference_view_cannot_be_marked_missing(ds):
+    ds.record_event("e-pkg", "package", analysis=analysis(package=0.95, view=None))
+    out = ds.record_event("e-gone", "motion", analysis=analysis(package=0.0))
+    assert out.package_action == "view_mismatch" and out.event.package_check == CHECK_NO_REFERENCE
+    assert ds.store.open_package().status is PackageStatus.PRESENT
+
+
+def test_capture_from_a_different_device_cannot_mark_missing(ds):
+    ds.record_event("e-pkg", "package", analysis=analysis(package=0.95), device_id="front-door")
+    out = ds.record_event("e-gone", "motion", analysis=analysis(package=0.0), device_id="back-door")
+    assert out.package_action == "view_mismatch" and out.view_check["reason"] == "different device"
     assert ds.store.open_package().status is PackageStatus.PRESENT
 
 
