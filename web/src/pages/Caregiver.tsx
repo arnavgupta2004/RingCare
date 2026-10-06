@@ -95,6 +95,7 @@ function AlertCard({ n, event, tz }: { n: Notification; event?: DoorEvent; tz: s
           <h3>{KIND_LABEL[n.kind] ?? n.kind}</h3>
           <SourceBadge source={n.source} />
           {isEstimate(n) && n.source !== "stub" && <EstimateBadge />}
+          {n.status === "sent" && <span className="muted small">emailed</span>}
           <time dateTime={n.sim_ts}>{formatDateTime(n.sim_ts, tz)}</time>
         </div>
         <p>{n.text}</p>
@@ -147,8 +148,16 @@ export default function Caregiver() {
       return `Daily digest written by ${r.brain} and ${r.notification?.status ?? "queued"}.`;
     });
 
+  // ?replay=1: the Simulate buttons replay a recorded Ring sandbox capture (demo recording).
+  const replayMode = new URLSearchParams(window.location.search).has("replay");
+
   const simulate = (type: "package" | "vehicle" | "motion") =>
-    run(`Simulating ${type}`, async () => {
+    replayMode
+      ? run(`Replaying ${type}`, async () => {
+          const r = await api.replay(type);
+          return `${type[0].toUpperCase()}${type.slice(1)} event handled by the agent (recorded Ring sandbox capture ${r.capture}).`;
+        })
+      : run(`Simulating ${type}`, async () => {
       const r = await api.simulate(type);
       return `Accepted ${r.event_id}: capturing ~20 s of live video, then analysing. Tip: ${r.presenter_hint}.`;
     });

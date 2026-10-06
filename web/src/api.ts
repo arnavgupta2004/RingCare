@@ -102,6 +102,11 @@ export const api = {
       method: "POST",
       body: JSON.stringify({}),
     }),
+  replay: (event_type: "package" | "vehicle" | "motion") =>
+    request<{ event_id: string; capture: string; reason: string }>("/demo/replay", {
+      method: "POST",
+      body: JSON.stringify({ event_type }),
+    }),
   simulate: (event_type: "package" | "vehicle" | "motion") =>
     request<{ status: string; event_id: string; presenter_hint: string }>("/simulate-event", {
       method: "POST",

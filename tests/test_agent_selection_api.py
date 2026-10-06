@@ -93,3 +93,26 @@ def test_webhook_events_use_the_agent(client, monkeypatch):
     import asyncio
     asyncio.run(events_mod.handle_event(events_mod.normalize(payload)))
     assert seen == [("vehicle", "webhook")]
+
+
+def test_demo_replay_runs_a_capture_through_the_agent(client, tmp_path, monkeypatch):
+    import json as _json
+
+    from tests.agent_helpers import analysis
+
+    frames = main.settings.data_dir / "frames" / "test-replay-capture"
+    frames.mkdir(parents=True, exist_ok=True)
+    from backend.vision import analyze as analyze_mod
+    an_path = tmp_path / "analysis.json"
+    an_path.write_text(_json.dumps(analysis(package=0.95)))
+    monkeypatch.setattr(analyze_mod, "analysis_path", lambda capture: an_path)
+    try:
+        r = client.post("/demo/replay", json={"event_type": "package", "capture": "test-replay-capture"}).json()
+        assert r["package_action"] == "created" and r["brain"] == "rules"
+        assert r["notifications"][0]["kind"] == "package_arrived"
+        ev = client.get("/state").json()["events"][0]
+        assert ev["source"] == "replay" and ev["event_type"] == "package"
+        assert client.post("/demo/replay", json={"event_type": "dragon"}).status_code == 422
+        assert client.post("/demo/replay", json={"event_type": "package", "capture": "nope"}).status_code == 404
+    finally:
+        frames.rmdir()

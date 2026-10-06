@@ -442,6 +442,44 @@ async def package_picked_up(package_id: str) -> dict[str, Any]:
     return pkg.to_dict()
 
 
+# Real sandbox captures recorded earlier (frames from the Ring WHEP stream), replayed for demos.
+REPLAY_CAPTURES = {
+    "package": "sim-package-1791250581919",
+    "vehicle": "sim-vehicle-1791250656310",
+    "motion": "sim-motion-1791250093388",
+}
+
+
+class ReplayRequest(BaseModel):
+    event_type: str
+    capture: str | None = None  # a data/frames/<capture> directory; default per event type
+
+
+@app.post("/demo/replay")
+async def demo_replay(body: ReplayRequest) -> dict[str, Any]:
+    """Dev/demo trigger: run a previously captured real sandbox clip through the agent.
+
+    Same path as a live event (agent, tools, guard rails, notifications), but the frames come
+    from data/frames/<capture> instead of a new WHEP session. The event is marked source="replay".
+    """
+    from backend.vision.analyze import analysis_path, analyze_event
+
+    capture = body.capture or REPLAY_CAPTURES.get(body.event_type)
+    if body.event_type not in SIMULATABLE or not capture:
+        raise HTTPException(422, f"event_type must be one of {list(SIMULATABLE)}")
+    frames_dir = settings.data_dir / "frames" / capture
+    if not frames_dir.is_dir():
+        raise HTTPException(404, f"no capture {capture}")
+    path = analysis_path(capture)
+    analysis = json.loads(path.read_text()) if path.exists() else await asyncio.to_thread(
+        analyze_event, capture, body.event_type, frames_dir)
+    event_id = f"replay-{body.event_type}-{_now_ms()}"
+    ctx = await get_runner().handle_event(event_id, body.event_type, source="replay", preloaded_analysis=analysis)
+    return {"event_id": event_id, "capture": capture, "brain": ctx.brain, "reason": ctx.reason,
+            "package_action": ctx.package_action,
+            "notifications": [{"audience": n.audience, "kind": n.kind, "text": n.text} for n in ctx.notifications]}
+
+
 class DigestRequest(BaseModel):
     day: str | None = None  # "YYYY-MM-DD" home-local; default = the 24 hours ending now (sim)
 
