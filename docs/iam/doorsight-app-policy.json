@@ -1,0 +1,40 @@
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Sid": "StateTable",
+      "Effect": "Allow",
+      "Action": [
+        "dynamodb:GetItem",
+        "dynamodb:PutItem",
+        "dynamodb:DeleteItem",
+        "dynamodb:Query",
+        "dynamodb:BatchWriteItem"
+      ],
+      "Resource": "arn:aws:dynamodb:${REGION}:${ACCOUNT}:table/doorsight-state"
+    },
+    {
+      "Sid": "SnapshotObjects",
+      "Effect": "Allow",
+      "Action": ["s3:PutObject", "s3:GetObject"],
+      "Resource": "arn:aws:s3:::doorsight-snapshots-${ACCOUNT}/frames/*"
+    },
+    {
+      "Sid": "CaregiverAlerts",
+      "Effect": "Allow",
+      "Action": "sns:Publish",
+      "Resource": "arn:aws:sns:${REGION}:${ACCOUNT}:doorsight-caregiver-alerts"
+    },
+    {
+      "Sid": "BedrockModels",
+      "Effect": "Allow",
+      "Action": ["bedrock:InvokeModel", "bedrock:InvokeModelWithResponseStream"],
+      "Resource": [
+        "arn:aws:bedrock:${REGION}:${ACCOUNT}:inference-profile/us.anthropic.claude-haiku-4-5-20251001-v1:0",
+        "arn:aws:bedrock:*::foundation-model/anthropic.claude-haiku-4-5-20251001-v1:0",
+        "arn:aws:bedrock:${REGION}:${ACCOUNT}:inference-profile/us.amazon.nova-lite-v1:0",
+        "arn:aws:bedrock:*::foundation-model/amazon.nova-lite-v1:0"
+      ]
+    }
+  ]
+}
