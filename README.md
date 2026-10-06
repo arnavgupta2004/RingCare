@@ -10,7 +10,7 @@ A Ring doorstep assistant for elderly and low-vision residents. Each Ring event 
 - [x] Step 2 — WHEP live-video frame capture (aiortc, 1 frame/s, up to 20 s)
 - [x] Step 3 — YOLO-World detection + Bedrock scene description (stub fallback when Bedrock is unavailable)
 - [x] Step 4 — Doorstep state (SQLite), package lifecycle, unusual-hour scoring, demo clock
-- [ ] Step 5 — Agent + caregiver alerts
+- [x] Step 5 — Strands agent (rules brain now; Bedrock brain switches on automatically) + SNS caregiver alerts + daily digest
 - [x] Step 6 — Resident and caregiver web views (React + Vite, axe-checked)
 - [ ] Step 7 — Full account linking flow
 - [ ] Step 8 — Docs, architecture diagram, demo
@@ -75,6 +75,19 @@ python scripts/demo_story.py
 ```
 
 Runs the story against real sandbox captures in a separate `data/demo.db`: package arrives (sim 2:10 PM) → clock +3 h → reminder → resident pickup → vehicle at sim 03:00 → unusual-hour caregiver alert.
+
+## Agent
+
+Every event goes through a Strands agent with eight tools (capture, describe, package state and update, visit baseline, notify resident or caregiver, daily digest). Each tool call and the agent's reason are stored on the event and shown in the caregiver view.
+
+- `AGENT_BRAIN=auto` (default): uses the Bedrock brain (Claude Haiku 4.5) if `scripts/check_bedrock.sh` passes at startup, otherwise the deterministic `rules` brain.
+- Safety rules (allowed package actions, notification preconditions) are enforced in the tools, so neither brain can, for example, mark a package missing from a different camera view.
+- If the model fails or times out, the rules brain finishes the event.
+
+```bash
+python scripts/demo_story.py --brain rules        # story + daily digest through the agent
+curl -X POST localhost:8000/digest                # write and send the caregiver digest
+```
 
 ## Web app
 

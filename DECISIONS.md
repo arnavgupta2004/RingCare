@@ -133,3 +133,42 @@ Both thresholds sit far from both clusters. The painted-out test matters most, b
 - **S3:** create bucket; unsigned GET → 403, presigned GET → 200.
 - **SNS:** create topic, subscribe, publish.
 - **Bedrock:** still blocked at the account level (see D4).
+
+## D8. The agent (step 5): Strands tools, two brains, guard rails in code
+
+**Shape:** every event (webhook or `/simulate-event`) goes to `AgentRunner.handle_event`. A *brain* decides which of eight tools to call:
+
+| Tool | What it does |
+|-|-|
+| `start_live_capture` | live WHEP capture, or an existing capture |
+| `describe_scene` | YOLO-World plus a Bedrock or stub description |
+| `get_package_state` | open package, view check, recommended and allowed actions |
+| `update_package_state` | apply an allowed action |
+| `get_visit_baseline` | unusual-hour score |
+| `notify_resident`, `notify_caregiver` | send a message |
+| `write_daily_digest` | write and send the caregiver digest |
+
+Every tool call (input, output or error, brain, time) and the brain's stated reason are stored on the event (`agent_trace`, `agent_reason`, `agent_brain`). The caregiver view shows them.
+
+**Brains:**
+- `rules`: deterministic. Calls the same tools in the same order as the original doorstep logic. Tests check that it produces identical packages, notifications and event checks to `Doorstep.record_event` across five scenarios, on SQLite and DynamoDB. Its messages are labelled `source: rules`.
+- `bedrock`: a Strands `Agent` on `BedrockModel` (`AGENT_MODEL_ID`, default `us.anthropic.claude-haiku-4-5-20251001-v1:0`), with the system prompt in `backend/agent/prompts.py`. Its messages are labelled `source: bedrock`.
+- **Selection:** `AGENT_BRAIN=rules|bedrock|auto`. `auto` (the default) runs `scripts/check_bedrock.sh` at server startup, in a background thread so startup isn't delayed, and picks `bedrock` only if it passes. Until the check finishes, and whenever it fails, events use `rules`. When Bedrock access is granted, a restart switches over with no code change.
+
+**Guard rails are in the tools, not the prompt:**
+- `get_package_state` returns the allowed actions, and `update_package_state` refuses anything else. For example, a capture from a different camera view only allows `no_change`.
+- `notify_resident(kind=package_arrived)` needs a package created in this event.
+- `notify_caregiver(package_missing)` needs the package marked missing in this event.
+- `notify_caregiver(unusual_hour)` needs `get_visit_baseline` first.
+- Text must be non-empty and at most 600 characters.
+- Refusals come back to the model as tool errors (Strands `status: error`), and nothing changes.
+
+**Failure handling:**
+- If the model errors or times out (`AGENT_TIMEOUT_S`, default 120 s), the rules brain finishes the event from where it stopped.
+- Tools are idempotent per event: capture and describe are cached, the same audience and kind is never notified twice, and a package action is applied once. So a fallback can't double-capture or double-alert.
+- The reason is prefixed with `[bedrock agent failed (<error>); handled by rules]`.
+- The event is always saved, with an unusual-hour score even if the agent never asked for it.
+
+**Daily digest:** the facts (deliveries, pickups, reminders, missing, unusual activity, door events, still at the door) are computed from stored records. A model can only add a one-sentence note, so it can't invent events. The window is the 24 hours ending now (sim), inclusive, or a calendar day. It is sent to the caregiver by SNS and shown in the caregiver view; trigger it with `POST /digest` or "Send daily digest".
+
+**Testing without Bedrock:** `tests/fakes.py` has a scripted Strands `Model` that streams pre-written tool calls through the real Strands agent loop. It covers the happy path, refused actions, guard ordering, model exceptions, timeouts, an agent that does nothing, and digests.
