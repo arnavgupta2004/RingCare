@@ -1,7 +1,9 @@
 """Run the DoorSight demo story end to end against real Ring sandbox captures.
 
     1. Package event at 2:10 PM (sim)  -> package present, resident notified
-    2. Advance the demo clock 3 hours  -> reminder to the resident
+       Vehicle event at 3:30 PM while the package is open (another camera view)
+                                       -> "different view — can't verify package", stays present
+    2. Advance the demo clock to 3 h after arrival -> reminder to the resident
     3. Resident presses "I picked it up" -> picked_up
     4. Vehicle event at 03:00 next day -> unusual-hour alert to the caregiver
 
@@ -54,6 +56,11 @@ def show_outcome(out) -> None:
           f"frames={ev.frame_count} ({ev.frame_source})  description={ev.description_source}")
     if out.package_action:
         print(f"  package {out.package_action}: {out.package.id} -> {out.package.status.value}")
+    if ev.package_check:
+        vc = out.view_check or {}
+        detail = f"  (view hash distance {vc['hash_distance']}, histogram correlation {vc['hist_correlation']})" \
+            if vc.get("hash_distance") is not None else ""
+        print(f"  check   {ev.package_check}{detail}")
     if out.unusual:
         print(f"  unusual score={out.unusual.score}  {out.unusual.explanation}")
     for n in out.notifications:
@@ -80,9 +87,19 @@ def main() -> int:
     out = ds.record_event(f"demo-{args.package_capture.name}", "package", analysis=pkg_analysis, source="demo")
     show_outcome(out)
     package_id = out.package.id
+    arrived = clock.now()
 
-    step("2. Advance demo clock 3 hours")
-    clock.advance(3 * 3600)
+    step("1b. Vehicle event while the package is still open (sim 3:30 PM, a different camera view)")
+    clock.advance(80 * 60)
+    out = ds.record_event(f"demo-afternoon-{args.vehicle_capture.name}", "vehicle", analysis=veh_analysis,
+                          source="demo")
+    show_outcome(out)
+    status = store.get_package(package_id).status.value
+    print(f"  package {package_id} is still: {status}")
+    assert status == "present", "a different camera view must not change the package state"
+
+    step("2. Advance demo clock to 3 h after arrival")
+    clock.advance((arrived + timedelta(hours=3) - clock.now()).total_seconds())
     print(f"  sim now {fmt_time(clock.now())}")
     for n in ds.check_reminders():
         print(f"  notify  [{n.audience}/{n.kind}] {n.text}")
@@ -93,7 +110,7 @@ def main() -> int:
 
     step("4. Vehicle event (sim 03:00 next day)")
     clock.set(datetime.combine(today + timedelta(days=1), datetime.min.time()).replace(hour=3))
-    out = ds.record_event(f"demo-{args.vehicle_capture.name}", "vehicle", analysis=veh_analysis, source="demo")
+    out = ds.record_event(f"demo-night-{args.vehicle_capture.name}", "vehicle", analysis=veh_analysis, source="demo")
     show_outcome(out)
 
     step("Final state")
@@ -105,7 +122,8 @@ def main() -> int:
     print("  events:")
     for e in store.list_events():
         score = f"  unusual={e.unusual_score}" if e.unusual_score is not None else ""
-        print(f"    {e.sim_ts}  {e.event_type:<8} {e.event_id}{score}")
+        check = f"  [{e.package_check}]" if e.package_check else ""
+        print(f"    {e.sim_ts}  {e.event_type:<8} {e.event_id}{score}{check}")
     print("  notifications:")
     for n in store.list_notifications():
         print(f"    {n.sim_ts}  {n.audience:<9} {n.kind:<16} source={n.source:<5} event={n.event_id}")

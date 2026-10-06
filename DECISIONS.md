@@ -60,11 +60,11 @@ If a capture returns fewer than 3 frames, wait 3 s and retry once. In testing, t
 | — | package event, package detected, no open package | present | resident: arrival |
 | present | `REMINDER_HOURS` (default 3, sim time) elapsed | reminded | resident: gentle reminder |
 | present / reminded | `POST /packages/{id}/picked-up` | picked_up | — |
-| present / reminded | new capture (≥3 frames) shows no package, no pickup | missing | caregiver: possible missing package |
+| present / reminded | new capture (≥3 frames) **of the arrival view** shows no package, no pickup | missing | caregiver: possible missing package |
 
 - **"Package detected"** means YOLO-World saw the package group in ≥30% of the capture's frames.
 - **Reminders are checked** on every event, on every clock change, and by a 60 s background loop (`REMINDER_CHECK_INTERVAL_S`).
-- **Known caveat:** any valid capture without a package can mark an open package missing. In the sandbox, the vehicle clip comes from a different camera, so a vehicle event while a package is open would wrongly mark it missing. On a real doorbell the view is fixed, so this doesn't arise.
+- **Missing requires the same view:** see D6.
 
 **Unusual-hour score:** only for vehicle/motion events (`vehicle`, `motion`, `human`, `other_motion`).
 - **Baseline:** per hour = prior from `config/visit_profile.json` (quiet 22:00–06:00 at 0.2, otherwise 3.0) + observed events in that hour. The current event is excluded from its own baseline.
@@ -72,3 +72,27 @@ If a capture returns fewer than 3 frames, wait 3 s and retry once. In testing, t
 - **Alert:** at ≥ `unusual_threshold` (0.7), a caregiver notification is queued with the explanation string.
 
 **Notifications** are only queued for now (`status: "queued"`): `{audience, kind, text, event_id, package_id, source}`. `source` is where the observation came from: `bedrock`, `stub`, or `rules` for purely time-based reminders.
+
+## D6. A package can only go missing on a capture of its arrival view
+
+**Problem:** "new capture without a package → missing" is wrong whenever the capture comes from a different view. In the sandbox, the Vehicle clip comes from another camera. In a real multi-camera home, the back-door camera never shows the front-door parcel. Either way, a false "possible missing package" alert would go to the caregiver.
+
+**Choice:** store a compact view fingerprint with each package at arrival (`packages.arrival_view`). Compare every later capture against it (`backend/vision/fingerprint.py`).
+- **Fingerprint:** for the first, middle and last frames of a capture, a 63-bit perceptual hash (DCT of a 32×32 grayscale thumbnail) plus a 32-bin grayscale histogram. About 0.5 KB per capture.
+- **Match:** if both captures have a `device_id`, they must agree. Then the best frame pair needs hash distance ≤ 12 **and** histogram correlation ≥ 0.7.
+- **No match:** the event records `package_check = "different view — can't verify package"` and the package is left exactly as it was. Its state is unchanged, `last_seen` isn't refreshed, and nobody is notified.
+- **No reference view** (packages from before this change): "no reference view — can't verify package". These packages are never auto-marked missing.
+- **Too-short capture** (< 3 frames) of the right view: "capture too short — can't verify package".
+
+**Measured on real sandbox captures:**
+
+| Comparison | Hash distance | Histogram correlation |
+|-|-|-|
+| same view, other frames | 0–2 | ≥ 0.996 |
+| same view, parcel painted out (OpenCV inpaint) | 4 | 0.996 |
+| vehicle-clip views | 32–36 | ≤ 0.18 |
+| bird-feeder view | 28–32 | ≤ −0.16 |
+
+Both thresholds sit far from both clusters. The painted-out test matters most, because a real "package taken" capture must still count as the same view.
+
+**Limits:** large lighting changes (day → night, IR mode) shift the histogram and could make the same camera look like a different view. That is the safe direction: no false alarm, but a theft at night might not be confirmed until a daytime capture. A pan/tilt camera or a re-mounted doorbell needs a new reference.
