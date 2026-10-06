@@ -96,3 +96,40 @@ If a capture returns fewer than 3 frames, wait 3 s and retry once. In testing, t
 Both thresholds sit far from both clusters. The painted-out test matters most, because a real "package taken" capture must still count as the same view.
 
 **Limits:** large lighting changes (day → night, IR mode) shift the histogram and could make the same camera look like a different view. That is the safe direction: no false alarm, but a theft at night might not be confirmed until a daytime capture. A pan/tilt camera or a re-mounted doorbell needs a new reference.
+
+## D7. AWS backends: DynamoDB, S3, SNS (selectable, minimal cost)
+
+**Selection:**
+
+| Setting | Values |
+|-|-|
+| `STATE_BACKEND` | `sqlite` (default) \| `dynamodb` |
+| `SNAPSHOT_BACKEND` | `local` (default) \| `s3` |
+| `SNS_TOPIC_ARN` | set → caregiver alerts go out by SNS email; unset → logged to `logs/notifications.log` |
+
+`scripts/aws_setup.sh` creates everything idempotently and records the names in `.env`; `--enable` switches state and snapshots to AWS. `scripts/aws_teardown.sh` deletes it all after a typed confirmation (`--dry-run` to preview).
+
+**DynamoDB:** one on-demand table, no secondary indexes.
+- **Why no indexes:** GSIs are only eventually consistent, but the state machine reads its own writes immediately (create a package, then look up the open package). So each entity kind is one partition (`pk = EVENT | PACKAGE | NOTIFICATION`) with a time-ordered sort key, read with `ConsistentRead`.
+- **Lookups by id:** a small pointer item, `ID#<kind>#<id>`.
+- **Scale:** one home produces tens of items a day, far below per-partition limits. A multi-home version would put the home id in `pk`.
+- **Tests:** the same store contract and doorstep tests run against SQLite and DynamoDB (moto) through one parametrized fixture.
+
+**S3 snapshots:**
+- **What's uploaded:** per event, the representative frame (most detections) plus the first and last frames, under the same `frames/...` key as on disk.
+- **Bucket:** private (all public-access blocks on), SSE-S3, and a lifecycle rule that expires frames after 30 days.
+- **UI access:** only 1-hour presigned GET URLs.
+- **Upload failure:** the event keeps its local reference, so the UI still shows a picture.
+
+**SNS:** caregiver notifications are published to `doorsight-caregiver-alerts`.
+- **Status:** each notification records `status = sent | logged | failed` and the SNS message id.
+- **Failures:** a failed publish falls back to the log file.
+- **Resident messages** stay in the resident web view and are not emailed.
+
+**Cost:** no always-on resources. On-demand DynamoDB, pay-per-request S3 and SNS (email: first 1,000/month free). The demo story costs well under a cent.
+
+**Verified on this account (6 Oct 2026):**
+- **DynamoDB:** create table, read/write.
+- **S3:** create bucket; unsigned GET → 403, presigned GET → 200.
+- **SNS:** create topic, subscribe, publish.
+- **Bedrock:** still blocked at the account level (see D4).

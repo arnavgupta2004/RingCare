@@ -104,6 +104,22 @@ python scripts/demo_story.py --db data/doorsight.db --until reminder  # package 
 |-|-|
 | ![Resident view](docs/screenshots/resident.png) | ![Caregiver view](docs/screenshots/caregiver.png) |
 
+## AWS
+
+```bash
+./scripts/aws_setup.sh --email you@example.com      # DynamoDB table, private S3 bucket, SNS topic (idempotent)
+./scripts/aws_setup.sh --enable                     # also switch STATE_BACKEND=dynamodb, SNAPSHOT_BACKEND=s3
+python scripts/demo_story.py --aws                  # run the story on DynamoDB + S3 + SNS
+./scripts/aws_teardown.sh --dry-run                 # preview deleting everything; drop --dry-run to do it
+```
+
+| Service | Used for | Selected by |
+|-|-|-|
+| Amazon DynamoDB | events, packages, notifications (on-demand) | `STATE_BACKEND=dynamodb` |
+| Amazon S3 | event snapshots (private, presigned URLs, 30-day expiry) | `SNAPSHOT_BACKEND=s3` |
+| Amazon SNS | caregiver alert emails | `SNS_TOPIC_ARN` |
+| Amazon Bedrock | scene descriptions (stub until account access is enabled) | `BEDROCK_MODEL_ID` |
+
 ## Credits
 
 Ring sandbox live-view clips are stock footage licensed under CC BY 4.0 (full attribution to be added with the demo).
