@@ -14,8 +14,10 @@ from typing import Any
 
 from fastapi import BackgroundTasks, FastAPI, Request
 from fastapi.responses import HTMLResponse, JSONResponse
+from pydantic import BaseModel
 
 from backend.config import get_settings
+from backend.events import SIMULATABLE, build_simulated_payload, handle_event, normalize
 from backend.ring.client import RingAPIError, RingClient, exchange_authorization_code
 from backend.ring.signatures import SIGNATURE_HEADER, check_link_time, nonce_matches, verify_webhook_signature
 from backend.token_store import TokenStore
@@ -134,11 +136,36 @@ async def webhook(request: Request, background: BackgroundTasks) -> JSONResponse
         logger.warning("webhook rejected: %s signature (%d bytes)", "missing" if not signature else "bad", len(raw))
         return JSONResponse({"error": "invalid signature"}, status_code=401)
 
-    background.add_task(_log_webhook, raw, dict(request.headers))
+    background.add_task(_process_webhook, raw, dict(request.headers))
     return JSONResponse({"status": "ok"})
 
 
-def _log_webhook(raw: bytes, headers: dict[str, str]) -> None:
+async def _process_webhook(raw: bytes, headers: dict[str, str]) -> None:
+    payload = _log_webhook(raw, headers)
+    if isinstance(payload, dict):
+        await handle_event(normalize(payload, source="webhook"))
+
+
+class SimulateEventRequest(BaseModel):
+    event_type: str
+    device_id: str | None = None
+    wait: bool = False  # true: block until capture finishes and return the result
+
+
+@app.post("/simulate-event")
+async def simulate_event(body: SimulateEventRequest, background: BackgroundTasks) -> JSONResponse:
+    """Dev trigger: the sandbox simulator does not send webhooks, so build the same
+    v1.1-shaped payload here and pass it through the same handler as /webhook."""
+    if body.event_type not in SIMULATABLE:
+        return JSONResponse({"error": f"event_type must be one of {list(SIMULATABLE)}"}, status_code=422)
+    event = normalize(build_simulated_payload(body.event_type, body.device_id), source="simulated")
+    if body.wait:
+        return JSONResponse(await handle_event(event))
+    background.add_task(handle_event, event)
+    return JSONResponse({"status": "accepted", "event_id": event.event_id}, status_code=202)
+
+
+def _log_webhook(raw: bytes, headers: dict[str, str]) -> Any:
     try:
         payload: Any = json.loads(raw)
     except ValueError:
@@ -152,6 +179,7 @@ def _log_webhook(raw: bytes, headers: dict[str, str]) -> None:
         f.write(json.dumps(entry) + "\n")
     event_type = payload.get("data", {}).get("type") if isinstance(payload, dict) else None
     logger.info("webhook logged: type=%s", event_type)
+    return payload
 
 
 def _last_webhook_summary() -> str:
