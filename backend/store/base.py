@@ -42,6 +42,10 @@ class EventRecord:
     package_check: str | None = None
     # Representative frame for the UI, relative to the data dir (e.g. "frames/<event>/frame_010.jpg")
     snapshot: str | None = None
+    # Which agent brain handled the event (bedrock | rules), its stated reason, and every tool call
+    agent_brain: str | None = None
+    agent_reason: str | None = None
+    agent_trace: list[dict[str, Any]] | None = None
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)

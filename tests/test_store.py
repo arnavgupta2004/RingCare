@@ -87,3 +87,10 @@ def test_clear_removes_everything(store):
     assert store.list_events() == [] and store.list_packages() == [] and store.list_notifications() == []
     assert store.get_event("e1") is None and store.get_package("p1") is None
     store.create_package(pkg("p1", "2026-10-06T14:10:00+05:30"))  # id is free again
+
+
+def test_notification_without_event_id_round_trips(store):
+    n = note("digest", "2026-10-06T21:00:00+05:30", audience="caregiver")
+    n.event_id = None
+    store.add_notification(n)
+    assert store.list_notifications()[0].event_id is None

@@ -29,7 +29,10 @@ CREATE TABLE IF NOT EXISTS events (
     unusual_score REAL,
     unusual_explanation TEXT,
     package_check TEXT,
-    snapshot TEXT
+    snapshot TEXT,
+    agent_brain TEXT,
+    agent_reason TEXT,
+    agent_trace TEXT
 );
 CREATE INDEX IF NOT EXISTS events_type_hour ON events (event_type, sim_hour);
 
@@ -69,6 +72,9 @@ MIGRATIONS = [
     ("events", "package_check", "TEXT"),
     ("packages", "arrival_view", "TEXT"),
     ("events", "snapshot", "TEXT"),
+    ("events", "agent_brain", "TEXT"),
+    ("events", "agent_reason", "TEXT"),
+    ("events", "agent_trace", "TEXT"),
 ]
 
 
@@ -103,6 +109,7 @@ class SQLiteStore(StateStore):
         row = event.to_dict()
         for k in _BOOL_EVENT_FIELDS:
             row[k] = int(row[k])
+        row["agent_trace"] = json.dumps(row["agent_trace"]) if row["agent_trace"] is not None else None
         self._insert("events", row, replace=True)
 
     @staticmethod
@@ -110,6 +117,7 @@ class SQLiteStore(StateStore):
         d = dict(row)
         for k in _BOOL_EVENT_FIELDS:
             d[k] = bool(d[k])
+        d["agent_trace"] = json.loads(d["agent_trace"]) if d.get("agent_trace") else None
         return EventRecord(**d)
 
     def get_event(self, event_id: str) -> EventRecord | None:
@@ -119,9 +127,9 @@ class SQLiteStore(StateStore):
     def list_events(self, event_types: list[str] | None = None) -> list[EventRecord]:
         if event_types:
             marks = ", ".join("?" for _ in event_types)
-            rows = self._select(f"SELECT * FROM events WHERE event_type IN ({marks}) ORDER BY sim_ts", tuple(event_types))
+            rows = self._select(f"SELECT * FROM events WHERE event_type IN ({marks}) ORDER BY sim_ts, rowid", tuple(event_types))
         else:
-            rows = self._select("SELECT * FROM events ORDER BY sim_ts")
+            rows = self._select("SELECT * FROM events ORDER BY sim_ts, rowid")
         return [self._event(r) for r in rows]
 
     # --- packages ------------------------------------------------------------
@@ -152,10 +160,10 @@ class SQLiteStore(StateStore):
     def list_packages(self, statuses: list[PackageStatus] | None = None) -> list[Package]:
         if statuses:
             marks = ", ".join("?" for _ in statuses)
-            rows = self._select(f"SELECT * FROM packages WHERE status IN ({marks}) ORDER BY arrived_sim_ts",
+            rows = self._select(f"SELECT * FROM packages WHERE status IN ({marks}) ORDER BY arrived_sim_ts, rowid",
                                 tuple(s.value for s in statuses))
         else:
-            rows = self._select("SELECT * FROM packages ORDER BY arrived_sim_ts")
+            rows = self._select("SELECT * FROM packages ORDER BY arrived_sim_ts, rowid")
         return [self._package(r) for r in rows]
 
     # --- notifications -------------------------------------------------------

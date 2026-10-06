@@ -226,6 +226,61 @@ class EventOutcome:
         }
 
 
+# --- Package assessment (the guard rails every brain goes through) -------------
+
+PACKAGE_ACTIONS = ("create", "mark_seen", "mark_missing", "no_change")
+
+
+@dataclass
+class PackageAssessment:
+    """What a capture can and cannot say about the package at the door.
+
+    `allowed` is enforced by Doorstep.apply_package_action, so no brain (rules or model)
+    can, e.g., mark a package missing from a different camera view.
+    """
+
+    open_package: Package | None
+    view_check: dict[str, Any] | None
+    recommended: str  # one of PACKAGE_ACTIONS
+    allowed: list[str]
+    check: str | None  # human-readable result, stored on the event
+    explanation: str
+
+    def to_dict(self) -> dict[str, Any]:
+        pkg = self.open_package
+        return {
+            "open_package": None if pkg is None else {
+                "id": pkg.id, "status": pkg.status.value, "arrived_sim_ts": pkg.arrived_sim_ts,
+                "last_seen_sim_ts": pkg.last_seen_sim_ts,
+            },
+            "view_check": self.view_check,
+            "recommended_action": self.recommended,
+            "allowed_actions": self.allowed,
+            "check": self.check,
+            "explanation": self.explanation,
+        }
+
+
+# --- Message templates (shared by the rules path and the rules brain) ------------
+
+def arrival_text(now: datetime) -> str:
+    return f"A package was left at your door at {fmt_time(now)}."
+
+
+def reminder_text(arrived: datetime) -> str:
+    return f"Gentle reminder: the package left at your door at {fmt_time(arrived)} is still there."
+
+
+def missing_text(pkg: Package, now: datetime) -> str:
+    arrived = datetime.fromisoformat(pkg.arrived_sim_ts)
+    return (f"Possible missing package: a package left at the door at {fmt_time(arrived)} is no longer "
+            f"visible at {fmt_time(now)}, and the resident has not marked it as picked up. Please check in.")
+
+
+def unusual_text(unusual: UnusualScore) -> str:
+    return f"Unusual-hour activity at the front door. {unusual.explanation}"
+
+
 # --- The state machine -------------------------------------------------------
 
 
@@ -247,13 +302,19 @@ class Doorstep:
                                     else os.getenv("REMINDER_HOURS", DEFAULT_REMINDER_HOURS))
         self.profile = profile or VisitProfile.load()
 
+    def _ts(self, dt: datetime) -> str:
+        return dt.isoformat(timespec="seconds")
+
     # notifications
 
-    def _notify(self, audience: str, kind: str, text: str, *, event_id: str | None, source: str,
-                package_id: str | None = None, extra: dict[str, Any] | None = None) -> Notification:
+    def notify(self, audience: str, kind: str, text: str, *, event_id: str | None, source: str,
+               package_id: str | None = None, extra: dict[str, Any] | None = None) -> Notification:
+        """Store a notification; caregiver notifications are also delivered (SNS or log)."""
+        if audience not in ("resident", "caregiver"):
+            raise ValueError(f"unknown audience {audience!r}")
         n = Notification(
             id=_new_id("ntf"), audience=audience, kind=kind, text=text, event_id=event_id,
-            source=source, sim_ts=self.clock.now().isoformat(timespec="seconds"), real_ts=self.clock.real_now().isoformat(timespec="seconds"),
+            source=source, sim_ts=self._ts(self.clock.now()), real_ts=self._ts(self.clock.real_now()),
             package_id=package_id, extra=extra or {},
         )
         if audience == "caregiver":
@@ -262,7 +323,94 @@ class Doorstep:
         logger.info("queued %s notification (%s): %s", audience, kind, text)
         return n
 
-    # events
+    _notify = notify  # backwards-compatible name
+
+    # primitives used by record_event and by the agent's tools
+
+    def score_event(self, event_type: str) -> UnusualScore | None:
+        """Unusual-hour score for vehicle/motion events, against history before this event."""
+        if event_type not in SCORED_EVENT_TYPES:
+            return None
+        history = [e.sim_hour for e in self.store.list_events(sorted(SCORED_EVENT_TYPES))]
+        return score_unusual_hour(event_type, self.clock.now(), history, self.profile)
+
+    def new_event(self, event_id: str, event_type: str, *, device_id: str | None, source: str,
+                  obs: dict[str, Any], unusual: UnusualScore | None) -> EventRecord:
+        now, real = self.clock.now(), self.clock.real_now()
+        return EventRecord(
+            event_id=event_id, event_type=event_type, real_ts=self._ts(real), sim_ts=self._ts(now),
+            sim_hour=now.hour, device_id=device_id, source=source, frame_source=obs["frame_source"],
+            frame_count=obs["frame_count"], package_seen=obs["package"], vehicle_seen=obs["vehicle"],
+            person_seen=obs["person"], description_source=obs["description_source"],
+            accessible_description=obs["accessible_description"],
+            unusual_score=unusual.score if unusual else None,
+            unusual_explanation=unusual.explanation if unusual else None,
+            snapshot=self.snapshots.publish(obs["snapshot"]),
+        )
+
+    def save_event(self, event: EventRecord) -> None:
+        self.store.add_event(event)
+
+    def assess_package(self, event_type: str, obs: dict[str, Any], device_id: str | None) -> PackageAssessment:
+        open_pkg = self.store.open_package()
+        view = dict(obs["view"], device_id=device_id) if obs.get("view") else None
+        view_check = compare_views(open_pkg.arrival_view, view) if open_pkg and obs["frame_count"] > 0 else None
+        same_view = bool(view_check and view_check["match"])
+
+        def result(recommended, allowed, check, explanation):
+            return PackageAssessment(open_pkg, view_check, recommended, allowed, check, explanation)
+
+        if obs["package"] and not open_pkg and event_type == "package":
+            return result("create", ["create", "no_change"], CHECK_NEW,
+                          "A package is visible and no package is being tracked.")
+        if not open_pkg:
+            why = ("A package is visible, but only package events start tracking a new package."
+                   if obs["package"] else "No package is being tracked and none is visible.")
+            return result("no_change", ["no_change"], None, why)
+        if obs["frame_count"] == 0:
+            return result("no_change", ["no_change"], None, "There is no capture to check the package against.")
+        if not same_view:
+            no_ref = (view_check or {}).get("reason") == "no reference view"
+            check = CHECK_NO_REFERENCE if no_ref else CHECK_DIFFERENT_VIEW
+            return result("no_change", ["no_change"], check,
+                          "This capture is not from the camera view where the package arrived, "
+                          "so it cannot confirm or deny the package.")
+        if obs["package"]:
+            return result("mark_seen", ["mark_seen", "no_change"], CHECK_PRESENT,
+                          "The package is still visible in its arrival view.")
+        if obs["frame_count"] < MIN_FRAMES_FOR_ABSENCE:
+            return result("no_change", ["no_change"], CHECK_TOO_SHORT,
+                          f"The capture has fewer than {MIN_FRAMES_FOR_ABSENCE} frames, too short to conclude "
+                          "the package is gone.")
+        return result("mark_missing", ["mark_missing", "no_change"], CHECK_GONE,
+                      "The arrival view no longer shows the package and the resident has not marked a pickup.")
+
+    def apply_package_action(self, action: str, assessment: PackageAssessment, event: EventRecord,
+                             obs: dict[str, Any]) -> Package | None:
+        """Apply a package action if the assessment allows it; raises PackageStateError otherwise."""
+        if action not in PACKAGE_ACTIONS:
+            raise PackageStateError(f"unknown action {action!r}; use one of {', '.join(PACKAGE_ACTIONS)}")
+        if action not in assessment.allowed:
+            raise PackageStateError(
+                f"action {action!r} is not allowed here ({assessment.explanation}) "
+                f"Allowed: {', '.join(assessment.allowed)}.")
+        now = self._ts(self.clock.now())
+        pkg = assessment.open_package
+        if action == "create":
+            view = dict(obs["view"], device_id=event.device_id) if obs.get("view") else None
+            pkg = Package(id=_new_id("pkg"), status=PackageStatus.PRESENT, arrived_event_id=event.event_id,
+                          arrived_sim_ts=now, arrived_real_ts=self._ts(self.clock.real_now()),
+                          last_seen_sim_ts=now, arrival_view=view)
+            self.store.create_package(pkg)
+        elif action == "mark_seen":
+            pkg.last_seen_sim_ts = now
+            self.store.update_package(pkg)
+        elif action == "mark_missing":
+            pkg.status, pkg.resolved_sim_ts, pkg.resolved_event_id = PackageStatus.MISSING, now, event.event_id
+            self.store.update_package(pkg)
+        return pkg
+
+    # events (reference rules path; the agent's rules brain makes the same decisions via tools)
 
     def record_event(
         self,
@@ -275,90 +423,42 @@ class Doorstep:
     ) -> EventOutcome:
         """Store an event and apply package lifecycle + unusual-hour rules."""
         reminders = self.check_reminders()  # bring time-based state up to date first
-        now, real = self.clock.now(), self.clock.real_now()
+        now = self.clock.now()
         obs = observations(analysis)
-
-        unusual = None
-        if event_type in SCORED_EVENT_TYPES:
-            history = [e.sim_hour for e in self.store.list_events(sorted(SCORED_EVENT_TYPES))]
-            unusual = score_unusual_hour(event_type, now, history, self.profile)
-
-        event = EventRecord(
-            event_id=event_id, event_type=event_type, real_ts=real.isoformat(timespec="seconds"), sim_ts=now.isoformat(timespec="seconds"),
-            sim_hour=now.hour, device_id=device_id, source=source, frame_source=obs["frame_source"],
-            frame_count=obs["frame_count"], package_seen=obs["package"], vehicle_seen=obs["vehicle"],
-            person_seen=obs["person"], description_source=obs["description_source"],
-            accessible_description=obs["accessible_description"],
-            unusual_score=unusual.score if unusual else None,
-            unusual_explanation=unusual.explanation if unusual else None,
-            snapshot=self.snapshots.publish(obs["snapshot"]),
-        )
+        unusual = self.score_event(event_type)
+        event = self.new_event(event_id, event_type, device_id=device_id, source=source, obs=obs, unusual=unusual)
         outcome = EventOutcome(event=event, unusual=unusual, notifications=list(reminders))
         obs_source = obs["description_source"] or "rules"
-        view = dict(obs["view"], device_id=device_id) if obs["view"] else None
 
-        # package lifecycle
-        open_pkg = self.store.open_package()
-        check = None
-        if open_pkg and obs["frame_count"] > 0:
-            outcome.view_check = compare_views(open_pkg.arrival_view, view)
-        same_view = bool(outcome.view_check and outcome.view_check["match"])
-        cant_verify = CHECK_NO_REFERENCE if (outcome.view_check or {}).get("reason") == "no reference view" \
-            else CHECK_DIFFERENT_VIEW
-
-        if obs["package"] and not open_pkg and event_type == "package":
-            pkg = Package(
-                id=_new_id("pkg"), status=PackageStatus.PRESENT, arrived_event_id=event_id,
-                arrived_sim_ts=now.isoformat(timespec="seconds"), arrived_real_ts=real.isoformat(timespec="seconds"),
-                last_seen_sim_ts=now.isoformat(timespec="seconds"), arrival_view=view,
-            )
-            self.store.create_package(pkg)
-            check = CHECK_NEW
-            outcome.package_action, outcome.package = "created", pkg
-            outcome.notifications.append(self._notify(
-                "resident", "package_arrived", f"A package was left at your door at {fmt_time(now)}.",
+        assessment = self.assess_package(event_type, obs, device_id)
+        outcome.view_check = assessment.view_check
+        event.package_check = assessment.check
+        action = assessment.recommended
+        pkg = self.apply_package_action(action, assessment, event, obs)
+        outcome.package = pkg
+        outcome.package_action = {
+            "create": "created", "mark_seen": "still_present", "mark_missing": "missing",
+        }.get(action, "view_mismatch" if assessment.check in (CHECK_DIFFERENT_VIEW, CHECK_NO_REFERENCE) else None)
+        if outcome.package_action is None:
+            outcome.package = None
+        if action == "create":
+            outcome.notifications.append(self.notify(
+                "resident", "package_arrived", arrival_text(now),
+                event_id=event_id, source=obs_source, package_id=pkg.id))
+        elif action == "mark_missing":
+            outcome.notifications.append(self.notify(
+                "caregiver", "package_missing", missing_text(pkg, now),
                 event_id=event_id, source=obs_source, package_id=pkg.id,
-            ))
-        elif open_pkg and obs["frame_count"] == 0:
-            pass  # no capture: nothing to say about the package
-        elif open_pkg and not same_view:
-            check = cant_verify
-            outcome.package_action, outcome.package = "view_mismatch", open_pkg
-            logger.info("event %s: %s (package %s stays %s)", event_id, check, open_pkg.id, open_pkg.status.value)
-        elif open_pkg and obs["package"]:
-            open_pkg.last_seen_sim_ts = now.isoformat(timespec="seconds")
-            self.store.update_package(open_pkg)
-            check = CHECK_PRESENT
-            outcome.package_action, outcome.package = "still_present", open_pkg
-        elif open_pkg and obs["frame_count"] < MIN_FRAMES_FOR_ABSENCE:
-            check = CHECK_TOO_SHORT
-        elif open_pkg:
-            open_pkg.status = PackageStatus.MISSING
-            open_pkg.resolved_sim_ts = now.isoformat(timespec="seconds")
-            open_pkg.resolved_event_id = event_id
-            self.store.update_package(open_pkg)
-            check = CHECK_GONE
-            outcome.package_action, outcome.package = "missing", open_pkg
-            arrived = datetime.fromisoformat(open_pkg.arrived_sim_ts)
-            outcome.notifications.append(self._notify(
-                "caregiver", "package_missing",
-                f"Possible missing package: a package left at the door at {fmt_time(arrived)} is no longer "
-                f"visible at {fmt_time(now)}, and the resident has not marked it as picked up. Please check in.",
-                event_id=event_id, source=obs_source, package_id=open_pkg.id,
-                extra={"arrived_sim_ts": open_pkg.arrived_sim_ts, "last_seen_sim_ts": open_pkg.last_seen_sim_ts,
-                       "view_check": outcome.view_check},
-            ))
+                extra={"arrived_sim_ts": pkg.arrived_sim_ts, "last_seen_sim_ts": pkg.last_seen_sim_ts,
+                       "view_check": assessment.view_check}))
+        elif outcome.package_action == "view_mismatch":
+            logger.info("event %s: %s (package %s stays %s)", event_id, assessment.check, pkg.id, pkg.status.value)
+        self.save_event(event)
 
-        event.package_check = check
-        self.store.add_event(event)
-
-        # unusual hour
         if unusual and unusual.score >= self.profile.unusual_threshold:
-            outcome.notifications.append(self._notify(
-                "caregiver", "unusual_hour",
-                f"Unusual-hour activity at the front door. {unusual.explanation}",
-                event_id=event_id, source=obs_source, extra={"score": unusual.score},
-            ))
+            outcome.notifications.append(self.notify(
+                "caregiver", "unusual_hour", unusual_text(unusual),
+                event_id=event_id, source=obs_source, extra={"score": unusual.score}))
         return outcome
 
     def check_reminders(self) -> list[Notification]:
@@ -370,12 +470,83 @@ class Doorstep:
             if now - arrived >= timedelta(hours=self.reminder_hours):
                 pkg.status, pkg.reminded_sim_ts = PackageStatus.REMINDED, now.isoformat(timespec="seconds")
                 self.store.update_package(pkg)
-                out.append(self._notify(
-                    "resident", "package_reminder",
-                    f"Gentle reminder: the package left at your door at {fmt_time(arrived)} is still there.",
+                out.append(self.notify(
+                    "resident", "package_reminder", reminder_text(arrived),
                     event_id=pkg.arrived_event_id, source="rules", package_id=pkg.id,
                 ))
         return out
+
+    # daily digest
+
+    def digest_period(self, day: str | None = None) -> tuple[datetime, datetime]:
+        """`day` = "YYYY-MM-DD" (home-local calendar day); default = the 24 hours ending now (sim)."""
+        if day:
+            start = datetime.fromisoformat(day).replace(tzinfo=self.clock.tz)
+            return start, start + timedelta(days=1)
+        end = self.clock.now()
+        return end - timedelta(days=1), end
+
+    def digest_facts(self, start: datetime, end: datetime) -> dict[str, Any]:
+        """Everything the caregiver digest says, computed from stored state only."""
+        def within(ts: str | None) -> bool:
+            return bool(ts) and start <= datetime.fromisoformat(ts) < end
+
+        events = [e for e in self.store.list_events() if within(e.sim_ts)]
+        packages = self.store.list_packages()
+        notes = [n for n in self.store.list_notifications() if within(n.sim_ts)]
+        threshold = self.profile.unusual_threshold
+        unusual = [e for e in events if e.unusual_score is not None and e.unusual_score >= threshold]
+        sources = sorted({e.description_source for e in events if e.description_source})
+        return {
+            "start": self._ts(start), "end": self._ts(end),
+            "deliveries": [p.arrived_sim_ts for p in packages if within(p.arrived_sim_ts)],
+            "pickups": [p.resolved_sim_ts for p in packages
+                        if p.status is PackageStatus.PICKED_UP and within(p.resolved_sim_ts)],
+            "missing": [p.resolved_sim_ts for p in packages
+                        if p.status is PackageStatus.MISSING and within(p.resolved_sim_ts)],
+            "reminders": [n.sim_ts for n in notes if n.kind == "package_reminder"],
+            "unusual": [{"sim_ts": e.sim_ts, "type": e.event_type, "score": e.unusual_score} for e in unusual],
+            "visits": {t: sum(1 for e in events if e.event_type == t) for t in sorted({e.event_type for e in events})},
+            "still_at_door": [p.arrived_sim_ts for p in packages if p.status.is_open],
+            "caregiver_alerts": sum(1 for n in notes if n.audience == "caregiver" and n.kind != "daily_digest"),
+            "observation_sources": sources,
+        }
+
+    def digest_text(self, facts: dict[str, Any], note: str | None = None) -> str:
+        tz = self.clock.tz
+
+        def t(ts: str) -> str:
+            return datetime.fromisoformat(ts).astimezone(tz).strftime("%a %I:%M %p").replace(" 0", " ")
+
+        def times(items: list[str]) -> str:
+            return ", ".join(t(x) for x in items)
+
+        lines = [f"DoorSight daily summary: {t(facts['start'])} to {t(facts['end'])}", ""]
+        d = facts["deliveries"]
+        lines.append(f"- Deliveries: {len(d)} package(s) arrived ({times(d)})." if d else "- Deliveries: none.")
+        p = facts["pickups"]
+        lines.append(f"- Picked up by the resident: {len(p)} ({times(p)})." if p else "- Picked up by the resident: none.")
+        if facts["reminders"]:
+            lines.append(f"- Reminders sent to the resident: {len(facts['reminders'])} ({times(facts['reminders'])}).")
+        m = facts["missing"]
+        lines.append(f"- Possible missing packages: {len(m)} ({times(m)})." if m else "- Possible missing packages: none.")
+        u = facts["unusual"]
+        if u:
+            items = "; ".join(f"{x['type']} at {t(x['sim_ts'])} (score {x['score']:.2f})" for x in u)
+            lines.append(f"- Unusual-hour activity: {len(u)} ({items}).")
+        else:
+            lines.append("- Unusual-hour activity: none.")
+        if facts["visits"]:
+            lines.append("- All door events: " + ", ".join(f"{n} {k}" for k, n in facts["visits"].items()) + ".")
+        s = facts["still_at_door"]
+        lines.append(f"- Still at the door now: {len(s)} package(s), arrived {times(s)}." if s
+                     else "- Still at the door now: nothing.")
+        if note:
+            lines += ["", f"Note: {note.strip()}"]
+        if "stub" in facts["observation_sources"]:
+            lines += ["", "Scene descriptions were automatic estimates from the local detector "
+                          "(the vision model was unavailable)."]
+        return "\n".join(lines)
 
     def mark_picked_up(self, package_id: str) -> Package:
         pkg = self.store.get_package(package_id)

@@ -5,7 +5,7 @@ package), so every read is a strongly consistent read on the base table; GSIs ca
 
 Layout (one partition per entity kind; a home has tens of items a day, far below partition limits):
     pk               sk                              item
-    EVENT            <sim_ts>#<event_id>             event attributes
+    EVENT            <sim_ts>#<insert ns>#<event_id> event attributes
     PACKAGE          <arrived_sim_ts>#<id>           package attributes
     NOTIFICATION     <sim_ts>#<insert ns>#<id>       notification attributes
     ID#<kind>#<id>   ID                              {"ref_sk": <sk above>}   (lookup by id)
@@ -19,7 +19,7 @@ from __future__ import annotations
 import json
 import os
 import time
-from dataclasses import fields
+from dataclasses import MISSING, fields
 from decimal import Decimal
 from typing import Any
 
@@ -31,7 +31,7 @@ from backend.store.base import EventRecord, Notification, Package, PackageStatus
 
 DEFAULT_TABLE = "doorsight-state"
 _INT_FIELDS = {"sim_hour", "frame_count"}
-_JSON_FIELDS = {"arrival_view", "extra"}
+_JSON_FIELDS = {"arrival_view", "extra", "agent_trace"}
 _KINDS = ("EVENT", "PACKAGE", "NOTIFICATION")
 
 
@@ -51,7 +51,10 @@ def _to_item(data: dict[str, Any]) -> dict[str, Any]:
 
 def _from_item(item: dict[str, Any], cls: type) -> dict[str, Any]:
     names = {f.name for f in fields(cls)}
-    out: dict[str, Any] = {}
+    # None values are not stored, so required-but-nullable fields (e.g. a digest's event_id)
+    # come back absent: restore them as None.
+    out: dict[str, Any] = {f.name: None for f in fields(cls)
+                           if f.default is MISSING and f.default_factory is MISSING}
     for k, v in item.items():
         if k not in names:
             continue  # pk / sk
@@ -105,7 +108,8 @@ class DynamoDBStore(StateStore):
     # --- events --------------------------------------------------------------
 
     def add_event(self, event: EventRecord) -> None:
-        self._put("EVENT", event.event_id, f"{event.sim_ts}#{event.event_id}", event.to_dict())
+        # insert-time tiebreaker: same-second events list in write order, as in SQLite
+        self._put("EVENT", event.event_id, f"{event.sim_ts}#{time.time_ns():020d}#{event.event_id}", event.to_dict())
 
     def get_event(self, event_id: str) -> EventRecord | None:
         item = self._get_by_id("EVENT", event_id)
