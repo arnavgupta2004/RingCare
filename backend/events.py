@@ -14,7 +14,7 @@ from typing import Any
 
 from backend.config import current_access_token, get_settings
 from backend.ring.client import RingClient
-from backend.vision.capture import capture_frames
+from backend.vision.capture import capture_with_retry
 
 logger = logging.getLogger("events")
 
@@ -113,7 +113,7 @@ async def handle_event(event: DoorEvent) -> dict[str, Any]:
             device_id = event.device_id or await default_device_id(token)
             out_dir = settings.data_dir / "frames" / _safe_dirname(event.event_id)
             async with _capture_lock:
-                result = await capture_frames(token, device_id, out_dir)
+                result = await capture_with_retry(token, device_id, out_dir)
             record["capture"] = result.as_dict()
         except Exception as exc:
             logger.error("event %s: capture failed: %s", event.event_id, exc)

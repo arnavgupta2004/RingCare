@@ -13,7 +13,9 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import shutil
 import time
+from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -29,6 +31,10 @@ TRACK_TIMEOUT_S = 10.0
 FRAME_TIMEOUT_S = 3.0
 # Battery devices cap sessions at 30 s, wired at 60 s; stay well under both.
 MAX_CAPTURE_S = 20.0
+# The first session after a Ring Playground button click often stalls within ~1 s
+# while the clip switches; retry once when we get fewer frames than this.
+MIN_FRAMES = 3
+RETRY_DELAY_S = 3.0
 
 
 @dataclass
@@ -41,6 +47,7 @@ class CaptureResult:
     width: int | None = None
     height: int | None = None
     error: str | None = None
+    attempts: int = 1
 
     def as_dict(self) -> dict:
         return {
@@ -52,6 +59,7 @@ class CaptureResult:
             "duration_s": round(self.duration_s, 2),
             "resolution": f"{self.width}x{self.height}" if self.width else None,
             "error": self.error,
+            "attempts": self.attempts,
         }
 
 
@@ -129,3 +137,45 @@ async def capture_frames(
                 len(result.frames), result.frames_received, result.duration_s, out_dir,
             )
     return result
+
+
+async def capture_with_retry(
+    access_token: str,
+    device_id: str,
+    out_dir: Path,
+    *,
+    capture: Callable[..., Awaitable[CaptureResult]] = capture_frames,
+    sleep: Callable[[float], Awaitable[None]] = asyncio.sleep,
+    min_frames: int = MIN_FRAMES,
+    retry_delay_s: float = RETRY_DELAY_S,
+) -> CaptureResult:
+    """Capture once; if fewer than `min_frames` frames came back, wait and retry once.
+
+    The retry replaces the first attempt's frames in the same directory. If the retry
+    is no better, the first attempt's result is kept.
+    """
+    first = await capture(access_token, device_id, out_dir)
+    if len(first.frames) >= min_frames:
+        return first
+
+    logger.warning("capture got %d frame(s) (< %d); retrying once in %.0fs",
+                   len(first.frames), min_frames, retry_delay_s)
+    await sleep(retry_delay_s)
+    stash = out_dir / "attempt1"
+    stash.mkdir(parents=True, exist_ok=True)
+    moved = [p.rename(stash / p.name) for p in first.frames if p.exists()]
+
+    second = await capture(access_token, device_id, out_dir)
+    second.attempts = 2
+    if len(second.frames) >= len(first.frames):
+        shutil.rmtree(stash, ignore_errors=True)
+        return second
+
+    # Retry was worse: restore the first attempt's frames.
+    for p in second.frames:
+        p.unlink(missing_ok=True)
+    for p in moved:
+        p.rename(out_dir / p.name)
+    shutil.rmtree(stash, ignore_errors=True)
+    first.attempts = 2
+    return first
