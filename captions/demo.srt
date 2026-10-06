@@ -59,73 +59,73 @@ and a Strands agent decides who to tell and why.
 Every step is recorded.
 
 16
-00:01:04,405 --> 00:01:05,629
+00:01:05,767 --> 00:01:06,991
 One big button.
 
 17
-00:01:05,629 --> 00:01:08,076
+00:01:06,991 --> 00:01:09,438
 No menus, nothing to read closely.
 
 18
-00:01:24,405 --> 00:01:27,432
+00:01:25,767 --> 00:01:28,794
 A car at 3 AM is unusual for this home,
 
 19
-00:01:27,432 --> 00:01:29,247
+00:01:28,794 --> 00:01:30,609
 based on its own visit pattern,
 
 20
-00:01:29,247 --> 00:01:31,971
+00:01:30,609 --> 00:01:33,333
 so the caregiver gets an alert that explains why.
 
 21
-00:01:49,402 --> 00:01:53,269
+00:01:50,764 --> 00:01:54,631
 A naive system would say the parcel was stolen just because a
 
 22
-00:01:53,269 --> 00:01:54,880
+00:01:54,631 --> 00:01:56,242
 different camera saw no box.
 
 23
-00:01:54,880 --> 00:01:58,747
+00:01:56,242 --> 00:02:00,109
 DoorSight fingerprints the camera view and refuses to raise a false alarm.
 
 24
-00:01:58,747 --> 00:02:01,647
+00:02:00,109 --> 00:02:03,009
 Its safety rules are enforced in the agent's tools,
 
 25
-00:02:01,647 --> 00:02:02,936
+00:02:03,009 --> 00:02:04,298
 not just its prompt.
 
 26
-00:02:15,405 --> 00:02:18,495
+00:02:16,767 --> 00:02:19,857
 Ring WHEP video and webhooks, YOLO-World locally,
 
 27
-00:02:18,495 --> 00:02:22,467
+00:02:19,857 --> 00:02:23,829
 a Strands agent on Amazon Bedrock, DynamoDB for state,
 
 28
-00:02:22,467 --> 00:02:26,881
+00:02:23,829 --> 00:02:28,243
 a private S3 bucket for snapshots, SNS for caregiver email,
 
 29
-00:02:26,881 --> 00:02:31,736
+00:02:28,243 --> 00:02:33,098
 all under a least-privilege IAM user, with more than 260 tests.
 
 30
-00:02:36,405 --> 00:02:38,957
+00:02:37,767 --> 00:02:40,319
 Ring's sandbox has one doorbell and no webhooks,
 
 31
-00:02:38,957 --> 00:02:42,784
+00:02:40,319 --> 00:02:44,146
 so we built around what's real and logged twelve friction entries for
 
 32
-00:02:42,784 --> 00:02:43,741
+00:02:44,146 --> 00:02:45,103
 the Ring team.
 
 33
-00:02:43,741 --> 00:02:46,931
+00:02:45,103 --> 00:02:48,293
 DoorSight helps people stay independent at their own front door.
