@@ -35,3 +35,7 @@ weights/
 video/raw/
 video/*.mp4
 video/timeline.json
+video/.chrome-profile/
+video/timeline_composite.json
+video/live_timeline.json
+video/scenes/live_yolo.*

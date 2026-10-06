@@ -1,7 +1,9 @@
 """Cut, caption and voice the recorded demo.
 
 Reads docs/VIDEO_SCRIPT.md (narration + timing), video/timeline.json (actual scene starts in the
-raw recording) and video/raw/demo_raw.webm (from scripts/record_demo.py). Writes:
+raw recording) and video/raw/demo_raw.webm (from scripts/record_demo.py); with the live package
+scene spliced in, pass --raw video/raw/demo_composite.mp4 --timeline video/timeline_composite.json.
+Writes:
 
     captions/demo.srt        captions timed to the narration
     video/demo_silent.mp4    1920x1080, burned-in captions, no audio
@@ -12,6 +14,7 @@ Needs an ffmpeg with libass (Homebrew: `brew install ffmpeg-full`); set FFMPEG t
 
 from __future__ import annotations
 
+import argparse
 import json
 import os
 import re
@@ -82,9 +85,14 @@ def srt_time(t: float) -> str:
 
 
 def main() -> int:
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--raw", type=Path, default=ROOT / "video" / "raw" / "demo_raw.webm",
+                        help="recording to cut (e.g. video/raw/demo_composite.mp4 from splice_live_scene.py)")
+    parser.add_argument("--timeline", type=Path, default=ROOT / "video" / "timeline.json")
+    args = parser.parse_args()
     scenes = load_scenes()
-    timeline = json.loads((ROOT / "video" / "timeline.json").read_text())["scene_offsets_s"]
-    raw = ROOT / "video" / "raw" / "demo_raw.webm"
+    timeline = json.loads(args.timeline.read_text())["scene_offsets_s"]
+    raw = args.raw
     origin = timeline[scenes[0]["id"]]  # trim everything before the first scene
     starts = {s["id"]: timeline[s["id"]] - origin for s in scenes}
     ends = {s["id"]: (starts[scenes[i + 1]["id"]] if i + 1 < len(scenes) else s["end"] + (starts[s["id"]] - s["start"]))
