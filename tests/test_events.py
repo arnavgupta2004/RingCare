@@ -58,6 +58,7 @@ def client(monkeypatch):
 def test_simulate_event_accepts_and_dispatches(client):
     r = client.post("/simulate-event", json={"event_type": "package"})
     assert r.status_code == 202
+    assert r.json()["presenter_hint"] == 'click "Package" in the Ring Playground first'
     assert [e.event_type for e in client.handled] == ["package"]
 
 

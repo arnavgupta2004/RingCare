@@ -47,6 +47,8 @@ ngrok http --url=<your-static-domain>.ngrok-free.app 8000
 
 `backend/vision/capture.py` opens a video-only (`recvonly`) WHEP session on the device, saves one JPEG per second for up to 20 s, then closes the peer connection and DELETEs the session. The sandbox token is re-read from `.env` on each capture, so a regenerated token works without a restart.
 
+Click the matching event (Package / Vehicle / Motion) in the Ring Playground first — it switches the clip the sandbox device streams.
+
 ```bash
 curl -X POST localhost:8000/simulate-event -H 'Content-Type: application/json' -d '{"event_type":"package","wait":true}'
 ```

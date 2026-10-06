@@ -155,14 +155,19 @@ class SimulateEventRequest(BaseModel):
 @app.post("/simulate-event")
 async def simulate_event(body: SimulateEventRequest, background: BackgroundTasks) -> JSONResponse:
     """Dev trigger: the sandbox simulator does not send webhooks, so build the same
-    v1.1-shaped payload here and pass it through the same handler as /webhook."""
+    v1.1-shaped payload here and pass it through the same handler as /webhook.
+
+    The Playground's Package/Vehicle/Motion buttons switch the clip the sandbox device
+    streams, so click the matching button in the Ring Playground before calling this."""
     if body.event_type not in SIMULATABLE:
         return JSONResponse({"error": f"event_type must be one of {list(SIMULATABLE)}"}, status_code=422)
     event = normalize(build_simulated_payload(body.event_type, body.device_id), source="simulated")
+    hint = f'click "{body.event_type.capitalize()}" in the Ring Playground first'
+    logger.info("simulate-event %s: presenter hint: %s", body.event_type, hint)
     if body.wait:
-        return JSONResponse(await handle_event(event))
+        return JSONResponse({**await handle_event(event), "presenter_hint": hint})
     background.add_task(handle_event, event)
-    return JSONResponse({"status": "accepted", "event_id": event.event_id}, status_code=202)
+    return JSONResponse({"status": "accepted", "event_id": event.event_id, "presenter_hint": hint}, status_code=202)
 
 
 def _log_webhook(raw: bytes, headers: dict[str, str]) -> Any:
