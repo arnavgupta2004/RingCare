@@ -7,6 +7,8 @@ import pytest
 os.environ.update({
     "AWS_ACCESS_KEY_ID": "testing", "AWS_SECRET_ACCESS_KEY": "testing", "AWS_SESSION_TOKEN": "testing",
     "AWS_DEFAULT_REGION": "us-east-1", "AWS_REGION": "us-east-1",
+    # Never run scripts/check_bedrock.sh (real AWS calls) from app startup in tests.
+    "AGENT_BRAIN": "rules",
 })
 
 
