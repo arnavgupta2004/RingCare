@@ -9,7 +9,7 @@ A Ring doorstep assistant for elderly and low-vision residents. Each Ring event 
 - [x] Step 1 — FastAPI backend with the Ring console endpoints, Amazon Vision API client, webhook HMAC verification
 - [x] Step 2 — WHEP live-video frame capture (aiortc, 1 frame/s, up to 20 s)
 - [x] Step 3 — YOLO-World detection + Bedrock scene description (stub fallback when Bedrock is unavailable)
-- [ ] Step 4 — Doorstep state and package lifecycle
+- [x] Step 4 — Doorstep state (SQLite), package lifecycle, unusual-hour scoring, demo clock
 - [ ] Step 5 — Agent + caregiver alerts
 - [ ] Step 6 — Resident and caregiver web views
 - [ ] Step 7 — Full account linking flow
@@ -41,6 +41,9 @@ ngrok http --url=<your-static-domain>.ngrok-free.app 8000
 | `POST /token` | Token Exchange URL | Receives the form-encoded auth code, exchanges it at `https://oauth.ring.com/oauth/token`, looks up the Account ID via `GET /v1/users/me`, stores tokens in `data/tokens.json` |
 | `POST /webhook` | Webhook URL | Verifies `X-Signature: sha256=<hex>` over the raw body, returns 200 immediately, logs the payload to `logs/webhooks.jsonl` |
 | `POST /simulate-event` | — | Dev trigger (`{"event_type": "package"\|"vehicle"\|"motion", "wait": false}`). Builds a v1.1-shaped event and runs it through the same handler as `/webhook`, which starts a WHEP capture to `data/frames/<event_id>/` |
+| `POST /demo/clock` | — | Set or advance simulated time (`{"set": "2026-10-07T03:00"}`, `{"advance_hours": 3}`, `{"reset": true}`), then run reminders |
+| `POST /packages/{id}/picked-up` | — | The resident's "I picked up the package" button |
+| `GET /state` | — | Packages, queued notifications, recent events, demo clock |
 | `GET /health` | — | Liveness |
 
 ## Frame capture
@@ -64,6 +67,14 @@ Each captured event is analysed into `data/analysis/<event_id>.json`:
 ./scripts/check_bedrock.sh                                        # can this AWS account call Bedrock?
 python scripts/analyze_event.py data/frames/<event_id>            # re-analyse an existing capture
 ```
+
+## Demo story
+
+```bash
+python scripts/demo_story.py
+```
+
+Runs the story against real sandbox captures in a separate `data/demo.db`: package arrives (sim 2:10 PM) → clock +3 h → reminder → resident pickup → vehicle at sim 03:00 → unusual-hour caregiver alert.
 
 ## Credits
 

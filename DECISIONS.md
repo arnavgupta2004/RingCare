@@ -46,3 +46,29 @@ If a capture returns fewer than 3 frames, wait 3 s and retry once. In testing, t
 - Accessible sentences come from fixed calm templates.
 
 **UI rule (step 6):** anything with `source: "stub"` must be labelled as an automatic estimate, not a vision-model description.
+
+## D5. Doorstep state, demo clock and rules (step 4)
+
+**Demo clock** (`backend/clock.py`): simulated now = real time + offset, in the home timezone (`HOME_TZ`, default `Asia/Kolkata`). The offset comes from `DEMO_TIME_OFFSET` (`3h`, `-90m`, `1d` or seconds) and can be changed with `POST /demo/clock` (`set`, `advance_hours`, `advance_seconds`, `reset`). All time-based rules read this clock, and every event stores both `real_ts` and `sim_ts`.
+
+**Store:** a `StateStore` interface with a SQLite implementation (`data/doorsight.db`; the demo uses `data/demo.db`). Tables: `events`, `packages`, `notifications`. A DynamoDB adapter only needs to implement the same interface.
+
+**Package lifecycle:** one open package at a time.
+
+| From | Trigger | To | Notification |
+|-|-|-|-|
+| — | package event, package detected, no open package | present | resident: arrival |
+| present | `REMINDER_HOURS` (default 3, sim time) elapsed | reminded | resident: gentle reminder |
+| present / reminded | `POST /packages/{id}/picked-up` | picked_up | — |
+| present / reminded | new capture (≥3 frames) shows no package, no pickup | missing | caregiver: possible missing package |
+
+- **"Package detected"** means YOLO-World saw the package group in ≥30% of the capture's frames.
+- **Reminders are checked** on every event, on every clock change, and by a 60 s background loop (`REMINDER_CHECK_INTERVAL_S`).
+- **Known caveat:** any valid capture without a package can mark an open package missing. In the sandbox, the vehicle clip comes from a different camera, so a vehicle event while a package is open would wrongly mark it missing. On a real doorbell the view is fixed, so this doesn't arise.
+
+**Unusual-hour score:** only for vehicle/motion events (`vehicle`, `motion`, `human`, `other_motion`).
+- **Baseline:** per hour = prior from `config/visit_profile.json` (quiet 22:00–06:00 at 0.2, otherwise 3.0) + observed events in that hour. The current event is excluded from its own baseline.
+- **Score:** `1 − weight(hour) / mean hourly weight`, clipped to [0, 1]. A vehicle at 03:00 on a fresh profile scores 0.90; daytime scores 0.
+- **Alert:** at ≥ `unusual_threshold` (0.7), a caregiver notification is queued with the explanation string.
+
+**Notifications** are only queued for now (`status: "queued"`): `{audience, kind, text, event_id, package_id, source}`. `source` is where the observation came from: `bedrock`, `stub`, or `rules` for purely time-based reminders.
