@@ -5,18 +5,23 @@ Run:  uvicorn backend.main:app --port 8000
 
 from __future__ import annotations
 
+import asyncio
 import html
 import json
+import os
+from contextlib import asynccontextmanager
+from datetime import datetime as _dt
 import logging
 import time
 from datetime import datetime, timezone
 from typing import Any
 
-from fastapi import BackgroundTasks, FastAPI, Request
+from fastapi import BackgroundTasks, FastAPI, HTTPException, Request
 from fastapi.responses import HTMLResponse, JSONResponse
 from pydantic import BaseModel
 
 from backend.config import get_settings
+from backend.doorstep import PackageStateError, get_doorstep
 from backend.events import SIMULATABLE, build_simulated_payload, handle_event, normalize
 from backend.ring.client import RingAPIError, RingClient, exchange_authorization_code
 from backend.ring.signatures import SIGNATURE_HEADER, check_link_time, nonce_matches, verify_webhook_signature
@@ -29,7 +34,27 @@ settings = get_settings()  # fails fast with a clear message if .env is incomple
 token_store = TokenStore(settings.tokens_file)
 settings.logs_dir.mkdir(parents=True, exist_ok=True)
 
-app = FastAPI(title="DoorSight", version="0.1.0")
+REMINDER_CHECK_INTERVAL_S = float(os.getenv("REMINDER_CHECK_INTERVAL_S", "60"))
+
+
+async def _reminder_loop() -> None:
+    """Promote overdue packages to "reminded" even when no new events arrive."""
+    while True:
+        await asyncio.sleep(REMINDER_CHECK_INTERVAL_S)
+        try:
+            await asyncio.to_thread(get_doorstep().check_reminders)
+        except Exception as exc:  # keep the loop alive
+            logger.error("reminder check failed: %s", exc)
+
+
+@asynccontextmanager
+async def lifespan(_: FastAPI):
+    task = asyncio.create_task(_reminder_loop())
+    yield
+    task.cancel()
+
+
+app = FastAPI(title="DoorSight", version="0.1.0", lifespan=lifespan)
 
 
 def _page(title: str, body: str) -> HTMLResponse:
@@ -168,6 +193,62 @@ async def simulate_event(body: SimulateEventRequest, background: BackgroundTasks
         return JSONResponse({**await handle_event(event), "presenter_hint": hint})
     background.add_task(handle_event, event)
     return JSONResponse({"status": "accepted", "event_id": event.event_id, "presenter_hint": hint}, status_code=202)
+
+
+# --- Doorstep state & demo clock -------------------------------------------
+
+
+class ClockRequest(BaseModel):
+    set: str | None = None  # ISO 8601; naive = home-local time, e.g. "2026-10-07T03:00"
+    advance_hours: float = 0.0
+    advance_seconds: float = 0.0
+    reset: bool = False
+
+
+@app.get("/demo/clock")
+async def get_demo_clock() -> dict[str, Any]:
+    return get_doorstep().clock.as_dict()
+
+
+@app.post("/demo/clock")
+async def set_demo_clock(body: ClockRequest) -> dict[str, Any]:
+    """Set or advance simulated time, then run time-based rules (reminders)."""
+    doorstep = get_doorstep()
+    clock = doorstep.clock
+    if body.reset:
+        clock.reset()
+    if body.set:
+        try:
+            clock.set(_dt.fromisoformat(body.set))
+        except ValueError as exc:
+            raise HTTPException(422, f"invalid 'set' time: {exc}") from exc
+    if body.advance_hours or body.advance_seconds:
+        clock.advance(body.advance_hours * 3600 + body.advance_seconds)
+    reminders = await asyncio.to_thread(doorstep.check_reminders)
+    return {**clock.as_dict(), "reminders_queued": [n.to_dict() for n in reminders]}
+
+
+@app.post("/packages/{package_id}/picked-up")
+async def package_picked_up(package_id: str) -> dict[str, Any]:
+    """The resident's "I picked up the package" button."""
+    try:
+        pkg = await asyncio.to_thread(get_doorstep().mark_picked_up, package_id)
+    except LookupError as exc:
+        raise HTTPException(404, str(exc)) from exc
+    except PackageStateError as exc:
+        raise HTTPException(409, str(exc)) from exc
+    return pkg.to_dict()
+
+
+@app.get("/state")
+async def state() -> dict[str, Any]:
+    doorstep = get_doorstep()
+    return {
+        "clock": doorstep.clock.as_dict(),
+        "packages": [p.to_dict() for p in doorstep.store.list_packages()],
+        "notifications": [n.to_dict() for n in doorstep.store.list_notifications()],
+        "events": [e.to_dict() for e in doorstep.store.list_events()[-50:]],
+    }
 
 
 def _log_webhook(raw: bytes, headers: dict[str, str]) -> Any:

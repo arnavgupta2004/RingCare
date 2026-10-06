@@ -14,6 +14,7 @@ from typing import Any
 
 from backend.config import current_access_token, get_settings
 from backend.ring.client import RingClient
+from backend.doorstep import get_doorstep
 from backend.vision.analyze import analyze_event
 from backend.vision.capture import capture_with_retry
 
@@ -107,6 +108,8 @@ async def handle_event(event: DoorEvent) -> dict[str, Any]:
     """Single entry point for every door event: record it, then capture frames if relevant."""
     settings = get_settings()
     record: dict[str, Any] = {"event": {k: v for k, v in asdict(event).items() if k != "raw"}}
+    analysis: dict[str, Any] | None = None
+    device_id = event.device_id
 
     if event.event_type in CAPTURE_EVENT_TYPES:
         token = current_access_token()
@@ -127,6 +130,21 @@ async def handle_event(event: DoorEvent) -> dict[str, Any]:
             record["capture"] = {"error": str(exc), "frame_count": 0}
     else:
         record["capture"] = None
+
+    try:
+        outcome = await asyncio.to_thread(
+            get_doorstep().record_event, event.event_id, event.event_type,
+            analysis=analysis, device_id=device_id, source=event.source,
+        )
+        record["doorstep"] = {
+            "sim_ts": outcome.event.sim_ts,
+            "package_action": outcome.package_action,
+            "unusual_score": outcome.event.unusual_score,
+            "notifications": [{"audience": n.audience, "kind": n.kind, "text": n.text} for n in outcome.notifications],
+        }
+    except Exception as exc:
+        logger.error("event %s: doorstep update failed: %s", event.event_id, exc)
+        record["doorstep"] = {"error": str(exc)}
 
     record["handled_at"] = datetime.now(timezone.utc).isoformat()
     with (settings.logs_dir / "events.jsonl").open("a") as f:
