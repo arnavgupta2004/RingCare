@@ -31,8 +31,15 @@ BODY = json.dumps(
 def client(tmp_path, monkeypatch):
     log_file = tmp_path / "webhooks.jsonl"
     monkeypatch.setattr(type(main.settings), "webhook_log_file", property(lambda self: log_file))
+    handled = []
+
+    async def fake_handle_event(event):
+        handled.append(event)
+
+    monkeypatch.setattr(main, "handle_event", fake_handle_event)
     with TestClient(main.app) as c:
         c.log_file = log_file
+        c.handled = handled
         yield c
 
 
@@ -43,6 +50,7 @@ def test_valid_signature_returns_200_and_logs_payload(client):
     lines = client.log_file.read_text().splitlines()
     assert len(lines) == 1
     assert json.loads(lines[0])["payload"]["data"]["type"] == "motion_detected"
+    assert [e.event_type for e in client.handled] == ["motion"]
 
 
 def test_invalid_signature_returns_401(client):
@@ -50,12 +58,14 @@ def test_invalid_signature_returns_401(client):
     r = client.post("/webhook", content=BODY, headers={"X-Signature": bad, "Content-Type": "application/json"})
     assert r.status_code == 401
     assert not client.log_file.exists()
+    assert client.handled == []
 
 
 def test_missing_signature_header_returns_401(client):
     r = client.post("/webhook", content=BODY, headers={"Content-Type": "application/json"})
     assert r.status_code == 401
     assert not client.log_file.exists()
+    assert client.handled == []
 
 
 def test_signature_is_over_raw_bytes_not_reserialized_json():
