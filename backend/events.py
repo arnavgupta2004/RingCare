@@ -14,6 +14,7 @@ from typing import Any
 
 from backend.config import current_access_token, get_settings
 from backend.ring.client import RingClient
+from backend.vision.analyze import analyze_event
 from backend.vision.capture import capture_with_retry
 
 logger = logging.getLogger("events")
@@ -115,6 +116,11 @@ async def handle_event(event: DoorEvent) -> dict[str, Any]:
             async with _capture_lock:
                 result = await capture_with_retry(token, device_id, out_dir)
             record["capture"] = result.as_dict()
+            if result.frames:
+                analysis = await asyncio.to_thread(
+                    analyze_event, event.event_id, event.event_type, out_dir, "ring_whep"
+                )
+                record["analysis"] = (analysis.get("description") or {}).get("result")
         except Exception as exc:
             logger.error("event %s: capture failed: %s", event.event_id, exc)
             record["capture"] = {"error": str(exc), "frame_count": 0}
