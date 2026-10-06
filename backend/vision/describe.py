@@ -121,10 +121,14 @@ def describe_scene(
 ) -> dict[str, Any]:
     """Call Bedrock Converse with representative frames + YOLO summary; return validated JSON + metadata."""
     model_id = model_id or os.getenv("BEDROCK_MODEL_ID", DEFAULT_MODEL_ID)
-    client = client or boto3.client(
-        "bedrock-runtime", region_name=AWS_REGION,
-        config=Config(connect_timeout=10, read_timeout=120, retries={"max_attempts": 2}),
-    )
+    if client is None:
+        try:
+            client = boto3.client(
+                "bedrock-runtime", region_name=AWS_REGION,
+                config=Config(connect_timeout=10, read_timeout=120, retries={"max_attempts": 2}),
+            )
+        except BotoCoreError as exc:
+            raise DescribeError(f"AWS client setup failed (check credentials / run `aws login`): {exc}") from exc
     chosen = pick_representative_frames(frames, detections)
     if not chosen:
         raise DescribeError("no frames to describe")
