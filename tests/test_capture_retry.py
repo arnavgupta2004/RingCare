@@ -7,7 +7,7 @@ def _fake_capture(frame_counts):
     """Fake capture that writes N dummy frames per call, N taken from frame_counts in order."""
     calls = []
 
-    async def capture(token, device_id, out_dir):
+    async def capture(token, device_id, out_dir, token_source="sandbox"):
         n = frame_counts[len(calls)]
         calls.append(n)
         out_dir.mkdir(parents=True, exist_ok=True)

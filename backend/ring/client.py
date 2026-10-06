@@ -46,11 +46,15 @@ class RingClient:
             devices = await ring.list_devices()
     """
 
-    def __init__(self, access_token: str, base_url: str = BASE_URL, timeout: float = TIMEOUT_SECONDS):
+    def __init__(self, access_token: str, base_url: str = BASE_URL, timeout: float = TIMEOUT_SECONDS, *,
+                 source: str = "sandbox", transport: httpx.AsyncBaseTransport | None = None):
+        """`source` labels which token this is (e.g. "sandbox" or "linked:…ABC12") in the request log."""
+        self.source = source
         self._client = httpx.AsyncClient(
             base_url=base_url,
             timeout=timeout,
             headers={"Authorization": f"Bearer {access_token}", "Accept": "application/json"},
+            transport=transport,
         )
 
     async def __aenter__(self) -> "RingClient":
@@ -63,7 +67,7 @@ class RingClient:
         await self._client.aclose()
 
     async def request(self, method: str, path: str, **kwargs: Any) -> Any:
-        logger.info("-> %s %s", method, path)
+        logger.info("-> %s %s [token: %s]", method, path, self.source)
         try:
             response = await self._client.request(method, path, **kwargs)
         except httpx.TimeoutException as exc:
@@ -73,9 +77,12 @@ class RingClient:
             logger.error("x  %s %s failed: %s", method, path, exc)
             raise RingAPIError(0, f"network error calling {method} {path}: {exc}") from exc
 
-        logger.info("<- %s %s %s", method, path, response.status_code)
+        logger.info("<- %s %s %s [token: %s]", method, path, response.status_code, self.source)
         if response.status_code == 401:
-            logger.error("401 from Ring: sandbox token expired, regenerate it in the console")
+            if self.source == "sandbox":
+                logger.error("401 from Ring: sandbox token expired, regenerate it in the console")
+            else:
+                logger.warning("401 from Ring with %s token (expired or revoked)", self.source)
             raise RingTokenExpiredError(_body(response))
         if response.status_code >= 400:
             raise RingAPIError(response.status_code, response.reason_phrase, _body(response))
@@ -94,6 +101,18 @@ class RingClient:
         """GET /v1/users/me — returns the Ring Account ID in data.id."""
         return await self.request("GET", "/v1/users/me")
 
+    async def confirm_account_link(self, nonce: str, account_identifier: str) -> Any:
+        """POST /v1/accounts/me/app-integrations — verify the nonce (status -> awaiting)."""
+        return await self.request("POST", "/v1/accounts/me/app-integrations",
+                                  json={"account_identifier": account_identifier, "nonce": nonce})
+
+    async def set_integration_status(self, status: str, account_identifier: str | None = None) -> Any:
+        """PATCH /v1/accounts/me/app-integrations — `completed` (required after POST) or `awaiting` (pause)."""
+        body: dict[str, str] = {"status": status}
+        if account_identifier:
+            body["account_identifier"] = account_identifier
+        return await self.request("PATCH", "/v1/accounts/me/app-integrations", json=body)
+
     async def start_whep_session(self, device_id: str, sdp_offer: str) -> tuple[str, str]:
         """POST /v1/devices/{id}/media/streaming/whep/sessions with an SDP offer.
 
@@ -101,7 +120,7 @@ class RingClient:
         body and the session URL (used for DELETE) in the Location header.
         """
         path = f"/v1/devices/{device_id}/media/streaming/whep/sessions"
-        logger.info("-> POST %s (sdp offer %d bytes)", path, len(sdp_offer))
+        logger.info("-> POST %s (sdp offer %d bytes) [token: %s]", path, len(sdp_offer), self.source)
         try:
             response = await self._client.post(
                 path, content=sdp_offer.encode(), headers={"Content-Type": "application/sdp"}
@@ -132,28 +151,40 @@ class RingClient:
             logger.warning("WHEP session DELETE returned %s: %s", response.status_code, _body(response))
 
 
-async def exchange_authorization_code(code: str, client_id: str, client_secret: str) -> dict[str, Any]:
-    """Exchange a Ring authorization code for access + refresh tokens.
-
-    POST https://oauth.ring.com/oauth/token (application/x-www-form-urlencoded).
-    The code is only valid for 60 seconds.
-    """
-    logger.info("-> POST %s grant_type=authorization_code", OAUTH_TOKEN_URL)
-    async with httpx.AsyncClient(timeout=TIMEOUT_SECONDS) as client:
+async def _oauth_token(form: dict[str, str], what: str,
+                       transport: httpx.AsyncBaseTransport | None = None) -> dict[str, Any]:
+    """POST https://oauth.ring.com/oauth/token (form-encoded). Never logs token values."""
+    logger.info("-> POST %s grant_type=%s", OAUTH_TOKEN_URL, form["grant_type"])
+    async with httpx.AsyncClient(timeout=TIMEOUT_SECONDS, transport=transport) as client:
         try:
-            response = await client.post(
-                OAUTH_TOKEN_URL,
-                data={
-                    "grant_type": "authorization_code",
-                    "code": code,
-                    "client_id": client_id,
-                    "client_secret": client_secret,
-                },
-            )
+            response = await client.post(OAUTH_TOKEN_URL, data=form)
         except httpx.HTTPError as exc:
-            logger.error("x  token exchange failed: %s", exc)
-            raise RingAPIError(0, f"token exchange network error: {exc}") from exc
+            logger.error("x  %s failed: %s", what, exc)
+            raise RingAPIError(0, f"{what} network error: {exc}") from exc
     logger.info("<- POST %s %s", OAUTH_TOKEN_URL, response.status_code)
     if response.status_code != 200:
-        raise RingAPIError(response.status_code, "token exchange failed", _body(response))
-    return response.json()
+        body = _body(response)
+        # Error bodies don't carry tokens, but keep only the error fields just in case.
+        safe = {k: body.get(k) for k in ("error", "error_description")} if isinstance(body, dict) else None
+        raise RingAPIError(response.status_code, f"{what} failed", safe)
+    tokens = response.json()
+    missing = [k for k in ("access_token", "expires_in") if k not in tokens]
+    if missing:
+        raise RingAPIError(200, f"{what} response is missing {', '.join(missing)}")
+    return tokens
+
+
+async def exchange_authorization_code(code: str, client_id: str, client_secret: str,
+                                      transport: httpx.AsyncBaseTransport | None = None) -> dict[str, Any]:
+    """Exchange a Ring authorization code (valid 60 s) for access + refresh tokens."""
+    return await _oauth_token({"grant_type": "authorization_code", "code": code,
+                               "client_id": client_id, "client_secret": client_secret},
+                              "token exchange", transport)
+
+
+async def refresh_access_token(refresh_token: str, client_id: str, client_secret: str,
+                               transport: httpx.AsyncBaseTransport | None = None) -> dict[str, Any]:
+    """Exchange a refresh token for a new access + refresh token pair (refresh tokens rotate)."""
+    return await _oauth_token({"grant_type": "refresh_token", "refresh_token": refresh_token,
+                               "client_id": client_id, "client_secret": client_secret},
+                              "token refresh", transport)

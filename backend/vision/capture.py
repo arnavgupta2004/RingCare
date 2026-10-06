@@ -22,7 +22,7 @@ from pathlib import Path
 from aiortc import RTCConfiguration, RTCIceServer, RTCPeerConnection, RTCSessionDescription
 from aiortc.mediastreams import MediaStreamError, MediaStreamTrack
 
-from backend.ring.client import RingClient
+from backend.ring.client import RingClient, RingTokenExpiredError
 
 logger = logging.getLogger("vision.capture")
 
@@ -69,6 +69,7 @@ async def capture_frames(
     out_dir: Path,
     max_seconds: float = MAX_CAPTURE_S,
     interval_s: float = 1.0,
+    token_source: str = "sandbox",
 ) -> CaptureResult:
     max_seconds = min(max_seconds, MAX_CAPTURE_S)
     out_dir.mkdir(parents=True, exist_ok=True)
@@ -93,7 +94,7 @@ async def capture_frames(
 
     session_url: str | None = None
     started = time.monotonic()
-    async with RingClient(access_token) as ring:
+    async with RingClient(access_token, source=token_source) as ring:
         try:
             await pc.setLocalDescription(await pc.createOffer())
             answer, session_url = await ring.start_whep_session(device_id, pc.localDescription.sdp)
@@ -124,6 +125,8 @@ async def capture_frames(
                     await asyncio.to_thread(image.save, path, "JPEG", quality=90)
                     result.frames.append(path)
                     next_save = now + interval_s  # no catch-up bursts after a stall
+        except RingTokenExpiredError:
+            raise  # the caller refreshes the token and retries (session is still closed below)
         except Exception as exc:  # recorded on the result; session is always closed below
             logger.error("capture failed: %s", exc)
             result.error = str(exc)
@@ -148,13 +151,14 @@ async def capture_with_retry(
     sleep: Callable[[float], Awaitable[None]] = asyncio.sleep,
     min_frames: int = MIN_FRAMES,
     retry_delay_s: float = RETRY_DELAY_S,
+    token_source: str = "sandbox",
 ) -> CaptureResult:
     """Capture once; if fewer than `min_frames` frames came back, wait and retry once.
 
     The retry replaces the first attempt's frames in the same directory. If the retry
     is no better, the first attempt's result is kept.
     """
-    first = await capture(access_token, device_id, out_dir)
+    first = await capture(access_token, device_id, out_dir, token_source=token_source)
     if len(first.frames) >= min_frames:
         return first
 
@@ -165,7 +169,7 @@ async def capture_with_retry(
     stash.mkdir(parents=True, exist_ok=True)
     moved = [p.rename(stash / p.name) for p in first.frames if p.exists()]
 
-    second = await capture(access_token, device_id, out_dir)
+    second = await capture(access_token, device_id, out_dir, token_source=token_source)
     second.attempts = 2
     if len(second.frames) >= len(first.frames):
         shutil.rmtree(stash, ignore_errors=True)
