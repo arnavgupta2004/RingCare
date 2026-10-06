@@ -117,3 +117,14 @@ Severity: High = blocks progress, Medium = costs real time or risks a wrong impl
 | Severity | Medium |
 | Workaround | Capture window starts at the first decoded frame; stop after 3 s without frames, then close and DELETE the session cleanly |
 | Suggestion | Document the sandbox stream length and the device's power type, and signal end-of-stream (e.g. RTCP BYE or a connection-state change) when the server stops sending |
+
+### 11. One-way apps can't disconnect a user from the partner side
+
+| Field | Detail |
+|-|-|
+| Task | Implement a working "Disconnect" button on the App Homepage URL (`/home`) |
+| Steps | Read the App Integrations API docs for removing an integration |
+| Expected vs actual | Expected a call the partner can make to unlink a user and revoke the tokens. `DELETE /v1/accounts/me/app-integrations` exists but only for partner-initiated OAuth apps; one-way (Ring-driven) apps get `403`. The only partner-side options are pausing (`PATCH status: awaiting`) and deleting our own copy of the tokens; the Ring user has to remove the app in the Ring app (or the developer uses "Disconnect all" in the console, which disconnects every account) |
+| Severity | Medium |
+| Workaround | Disconnect pauses the integration, deletes DoorSight's tokens, and tells the user how to remove DoorSight in the Ring app; the `app_integration_removed` webhook deletes tokens if they remove it there first |
+| Suggestion | Allow DELETE for one-way apps too (or document why not on the App Homepage URL guidance), and add per-account disconnect to the private-app Connect step |

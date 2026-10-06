@@ -12,7 +12,7 @@ A Ring doorstep assistant for elderly and low-vision residents. Each Ring event 
 - [x] Step 4 — Doorstep state (SQLite), package lifecycle, unusual-hour scoring, demo clock
 - [x] Step 5 — Strands agent (rules brain now; Bedrock brain switches on automatically) + SNS caregiver alerts + daily digest
 - [x] Step 6 — Resident and caregiver web views (React + Vite, axe-checked)
-- [ ] Step 7 — Full account linking flow
+- [x] Step 7 — Real one-way account linking (sign-in, nonce, POST/PATCH app-integrations, token refresh, disconnect)
 - [ ] Step 8 — Docs, architecture diagram, demo
 
 ## Quick start
@@ -36,9 +36,9 @@ ngrok http --url=<your-static-domain>.ngrok-free.app 8000
 
 | Route | Ring console field | Purpose |
 |-|-|-|
-| `GET /link` | Account Link URL | Validates `time` (10 min window) and matches the `nonce` (HMAC-SHA256, URL-safe Base64, no padding) against stored unclaimed tokens |
-| `GET /home` | App Homepage URL | Connection status |
-| `POST /token` | Token Exchange URL | Receives the form-encoded auth code, exchanges it at `https://oauth.ring.com/oauth/token`, looks up the Account ID via `GET /v1/users/me`, stores tokens in `data/tokens.json` |
+| `GET/POST /link` | Account Link URL | Checks `time` (10 min window), requires DoorSight sign-in, matches the `nonce` (HMAC-SHA256, URL-safe Base64) to an unclaimed token, then confirms with Ring (POST + PATCH app-integrations) |
+| `GET /home` | App Homepage URL | Linked status; after sign-in: Ring account ID, token expiry, token source, Disconnect |
+| `POST /token` | Token Exchange URL | Receives the form-encoded auth code, exchanges it at `https://oauth.ring.com/oauth/token`, looks up the Account ID via `GET /v1/users/me`, stores the tokens (unclaimed) in the state store |
 | `POST /webhook` | Webhook URL | Verifies `X-Signature: sha256=<hex>` over the raw body, returns 200 immediately, logs the payload to `logs/webhooks.jsonl` |
 | `POST /simulate-event` | — | Dev trigger (`{"event_type": "package"\|"vehicle"\|"motion", "wait": false}`). Builds a v1.1-shaped event and runs it through the same handler as `/webhook`, which starts a WHEP capture to `data/frames/<event_id>/` |
 | `POST /demo/clock` | — | Set or advance simulated time (`{"set": "2026-10-07T03:00"}`, `{"advance_hours": 3}`, `{"reset": true}`), then run reminders |

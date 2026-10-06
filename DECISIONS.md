@@ -172,3 +172,25 @@ Every tool call (input, output or error, brain, time) and the brain's stated rea
 **Daily digest:** the facts (deliveries, pickups, reminders, missing, unusual activity, door events, still at the door) are computed from stored records. A model can only add a one-sentence note, so it can't invent events. The window is the 24 hours ending now (sim), inclusive, or a calendar day. It is sent to the caregiver by SNS and shown in the caregiver view; trigger it with `POST /digest` or "Send daily digest".
 
 **Testing without Bedrock:** `tests/fakes.py` has a scripted Strands `Model` that streams pre-written tool calls through the real Strands agent loop. It covers the happy path, refused actions, guard ordering, model exceptions, timeouts, an agent that does nothing, and digests.
+
+## D9. Real one-way account linking (step 7)
+
+**Flow (from the Ring docs):**
+1. Ring POSTs a form-encoded `code` to `/token`. We exchange it at `https://oauth.ring.com/oauth/token` (60 s window), call `GET /v1/users/me` for the Ring account ID, and store the tokens in the configured StateStore as an **unclaimed** linked account. Unclaimed accounts are matchable for 15 minutes.
+2. Ring redirects the user to `/link?nonce&time`. We reject `time` older than 600 s or in the future, then **require sign-in** before touching the nonce.
+3. After sign-in we match the nonce in constant time against unclaimed accounts: `Base64URL_NoPadding(HMAC-SHA256(key, "<time>:<account_id>"))`.
+4. `POST /v1/accounts/me/app-integrations {nonce, account_identifier}` (status `awaiting`), then the mandatory `PATCH {status: completed}`. If the PATCH fails, the account is still linked and `/home` offers "Finish setup".
+
+**Sign-in:** one local demo user (`DEMO_USER_EMAIL`).
+- **Password:** stored only as a scrypt hash (`DEMO_USER_PASSWORD_HASH`, set by `scripts/set_demo_password.py`).
+- **Session cookie:** HMAC-signed (`SESSION_SECRET`), HttpOnly and SameSite=Lax, valid 8 h. It's Secure over HTTPS (ngrok).
+- **Protections:** POSTs are refused when Origin doesn't match the host. Sign-in is throttled to 5 failures per 5 minutes per client.
+- **Ring confirmation:** the masked email (`d***o@doorsight.local`) is sent as `account_identifier`, which Ring shows in its confirmation email.
+
+**Tokens:**
+- **Storage:** stored per Ring account (`LinkedAccount`) in SQLite or DynamoDB. Never logged or rendered: logs name the source as `linked:…<last 6 of account id>` or `sandbox`. Every API request logs which source it used.
+- **Refresh:** 5 minutes before expiry, once on a 401 (then retried once), and from a background check every 10 minutes that also refreshes anything not refreshed in 24 h, so the ~30-day refresh token never lapses. Refresh tokens rotate.
+- **Failed refresh:** a refresh rejected with 400/401 marks the account `needs_relink` and calls fall back to the sandbox token.
+- **Selection:** API calls (device list, WHEP capture) use the most recently linked account's token, else `RING_ACCESS_TOKEN`.
+
+**Disconnect:** `DELETE app-integrations` is not available to one-way apps (403; friction #11). So Disconnect pauses the integration (`PATCH awaiting`), deletes our tokens and tells the user to remove DoorSight in the Ring app for a full revoke. An `app_integration_removed` webhook deletes the tokens too. Lifecycle webhooks no longer go to the door agent.
