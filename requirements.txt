@@ -6,3 +6,5 @@ python-multipart==0.0.20
 pytest==8.3.4
 aiortc==1.15.0
 pillow==12.3.0
+ultralytics==8.4.173
+boto3==1.43.108
