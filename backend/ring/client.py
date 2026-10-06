@@ -94,6 +94,43 @@ class RingClient:
         """GET /v1/users/me — returns the Ring Account ID in data.id."""
         return await self.request("GET", "/v1/users/me")
 
+    async def start_whep_session(self, device_id: str, sdp_offer: str) -> tuple[str, str]:
+        """POST /v1/devices/{id}/media/streaming/whep/sessions with an SDP offer.
+
+        Returns (sdp_answer, session_url). Ring answers 201 with the answer SDP in the
+        body and the session URL (used for DELETE) in the Location header.
+        """
+        path = f"/v1/devices/{device_id}/media/streaming/whep/sessions"
+        logger.info("-> POST %s (sdp offer %d bytes)", path, len(sdp_offer))
+        try:
+            response = await self._client.post(
+                path, content=sdp_offer.encode(), headers={"Content-Type": "application/sdp"}
+            )
+        except httpx.HTTPError as exc:
+            logger.error("x  POST %s failed: %s", path, exc)
+            raise RingAPIError(0, f"network error starting WHEP session: {exc}") from exc
+        logger.info("<- POST %s %s", path, response.status_code)
+        if response.status_code == 401:
+            raise RingTokenExpiredError(_body(response))
+        if response.status_code != 201:
+            raise RingAPIError(response.status_code, "WHEP session creation failed", _body(response))
+        location = response.headers.get("Location")
+        if not location:
+            raise RingAPIError(201, "WHEP answer had no Location header")
+        return response.text, str(self._client.base_url.join(location))
+
+    async def stop_whep_session(self, session_url: str) -> None:
+        """DELETE the WHEP session URL from the Location header."""
+        logger.info("-> DELETE whep session")
+        try:
+            response = await self._client.delete(session_url)
+        except httpx.HTTPError as exc:
+            logger.error("x  DELETE whep session failed: %s", exc)
+            return
+        logger.info("<- DELETE whep session %s", response.status_code)
+        if response.status_code >= 400 and response.status_code != 404:
+            logger.warning("WHEP session DELETE returned %s: %s", response.status_code, _body(response))
+
 
 async def exchange_authorization_code(code: str, client_id: str, client_secret: str) -> dict[str, Any]:
     """Exchange a Ring authorization code for access + refresh tokens.

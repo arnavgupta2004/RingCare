@@ -7,7 +7,7 @@ from dataclasses import dataclass
 from functools import lru_cache
 from pathlib import Path
 
-from dotenv import load_dotenv
+from dotenv import dotenv_values, load_dotenv
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 REQUIRED_VARS = ("RING_CLIENT_ID", "RING_CLIENT_SECRET", "RING_HMAC_KEY", "RING_ACCESS_TOKEN")
@@ -33,6 +33,13 @@ class Settings:
     @property
     def webhook_log_file(self) -> Path:
         return self.logs_dir / "webhooks.jsonl"
+
+
+def current_access_token() -> str:
+    """Sandbox token, re-read from .env on every call so a regenerated 30-minute
+    token takes effect without restarting the server."""
+    token = (dotenv_values(PROJECT_ROOT / ".env").get("RING_ACCESS_TOKEN") or "").strip()
+    return token or get_settings().ring_access_token
 
 
 @lru_cache(maxsize=1)
