@@ -1,0 +1,52 @@
+flowchart TB
+  subgraph Ring["Ring · Amazon Vision API"]
+    direction LR
+    WH["Webhooks<br/>HMAC-signed v1.1"]
+    OAUTH["OAuth + App-Integrations<br/>account linking"]
+    DEV["GET /v1/devices"]
+    WHEP["WHEP live video"]
+  end
+
+  subgraph Backend["DoorSight backend · FastAPI"]
+    direction TB
+    EP["Ring console endpoints<br/>/webhook · /token · /link · /home<br/>+ /simulate-event (dev trigger)"]
+    ACC["Accounts & tokens<br/>backend/ring/accounts.py<br/>linked token or sandbox · auto refresh"]
+    AG["Strands agent · backend/agent/<br/>8 tools · rules brain or Bedrock brain<br/>every tool call + reason recorded"]
+    CAP["Frame capture<br/>backend/vision/capture.py<br/>aiortc · 1 frame/s · ≤ 20 s"]
+    VIS["Scene analysis<br/>YOLO-World + vision model<br/>(stub when Bedrock is unavailable)"]
+    DS["Doorstep rules & guard rails<br/>backend/doorstep.py<br/>package lifecycle · camera-view check<br/>unusual-hour score · daily digest"]
+    API["UI API · /state · /packages/{id}/picked-up<br/>/demo/clock · /digest"]
+  end
+
+  subgraph AWS["AWS · least-privilege IAM user doorsight-app"]
+    direction LR
+    BR["Amazon Bedrock<br/>Claude Haiku 4.5"]
+    DDB["Amazon DynamoDB<br/>events · packages · alerts · tokens"]
+    S3["Amazon S3<br/>private snapshots · presigned URLs"]
+    SNS["Amazon SNS<br/>caregiver email alerts + digest"]
+  end
+
+  subgraph Web["Web app · React + Vite"]
+    direction LR
+    RES["/resident<br/>large text · screen reader first"]
+    CG["/caregiver<br/>alerts · reasoning · digest"]
+  end
+
+  WH --> EP
+  OAUTH <--> EP
+  EP --> AG
+  AG --> CAP
+  WHEP --> CAP
+  DEV --> ACC
+  ACC -. token .-> CAP
+  CAP --> VIS
+  VIS --> AG
+  AG --> DS
+  VIS -. vision .-> BR
+  AG -. agent brain .-> BR
+  DS --> DDB
+  DS --> S3
+  DS --> SNS
+  DS --> API
+  API --> RES
+  API --> CG

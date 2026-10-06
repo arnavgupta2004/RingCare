@@ -193,4 +193,4 @@ Every tool call (input, output or error, brain, time) and the brain's stated rea
 - **Failed refresh:** a refresh rejected with 400/401 marks the account `needs_relink` and calls fall back to the sandbox token.
 - **Selection:** API calls (device list, WHEP capture) use the most recently linked account's token, else `RING_ACCESS_TOKEN`.
 
-**Disconnect:** `DELETE app-integrations` is not available to one-way apps (403; friction #11). So Disconnect pauses the integration (`PATCH awaiting`), deletes our tokens and tells the user to remove DoorSight in the Ring app for a full revoke. An `app_integration_removed` webhook deletes the tokens too. Lifecycle webhooks no longer go to the door agent.
+**Disconnect:** `DELETE app-integrations` is not available to one-way apps (403; friction F11). So Disconnect pauses the integration (`PATCH awaiting`), deletes our tokens and tells the user to remove DoorSight in the Ring app for a full revoke. An `app_integration_removed` webhook deletes the tokens too. Lifecycle webhooks no longer go to the door agent.
