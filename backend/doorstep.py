@@ -25,6 +25,8 @@ from typing import Any
 
 from backend.clock import DemoClock, get_clock
 from backend.config import PROJECT_ROOT
+from backend.notify import LogNotifier, SNSNotifier, notifier_from_env
+from backend.snapshots import LocalSnapshots, S3Snapshots, get_snapshots
 from backend.store import EventRecord, Notification, Package, PackageStatus, StateStore, get_store
 from backend.vision.fingerprint import compare_views, view_fingerprint
 
@@ -147,7 +149,7 @@ def observations(analysis: dict[str, Any] | None) -> dict[str, Any]:
     if not analysis:
         return {"frame_count": 0, "package": False, "vehicle": False, "person": False,
                 "description_source": None, "accessible_description": None, "frame_source": None,
-                "view": None, "snapshot": None}
+                "view": None, "snapshot": []}
     summary = (analysis.get("detections") or {}).get("summary", {})
     desc = analysis.get("description") or {}
 
@@ -167,12 +169,23 @@ def observations(analysis: dict[str, Any] | None) -> dict[str, Any]:
     }
 
 
-def _snapshot(analysis: dict[str, Any]) -> str | None:
-    """Frame with the most relevant detections (else the middle one), relative to the data dir."""
+def _snapshot(analysis: dict[str, Any]) -> list[str]:
+    """Representative frames, relative to the data dir: the frame with the most relevant
+    detections (else the middle one) first, then the first and last frames."""
     frames_dir = analysis.get("frames_dir")
     det_frames = (analysis.get("detections") or {}).get("frames") or []
     if not frames_dir or not det_frames:
-        return None
+        return []
+    mid = len(det_frames) // 2
+    best = max(det_frames, key=lambda f: (sum(f["counts"].values()), -abs(f["index"] - mid)))
+    picks = [best["frame"]] + [f["frame"] for f in (det_frames[0], det_frames[-1]) if f["frame"] != best["frame"]]
+    base = Path(frames_dir)
+    base = base if base.is_absolute() else PROJECT_ROOT / base
+    try:
+        rel = base.relative_to(PROJECT_ROOT / "data")
+    except ValueError:
+        return []
+    return [str(rel / name) for name in dict.fromkeys(picks)]
     best = max(det_frames, key=lambda f: (sum(f["counts"].values()), -abs(f["index"] - len(det_frames) // 2)))
     path = Path(frames_dir) / best["frame"]
     data_dir = PROJECT_ROOT / "data"
@@ -223,9 +236,13 @@ class Doorstep:
         clock: DemoClock,
         reminder_hours: float | None = None,
         profile: VisitProfile | None = None,
+        snapshots: LocalSnapshots | S3Snapshots | None = None,
+        notifier: LogNotifier | SNSNotifier | None = None,
     ):
         self.store = store
         self.clock = clock
+        self.snapshots = snapshots or LocalSnapshots()
+        self.notifier = notifier or LogNotifier()
         self.reminder_hours = float(reminder_hours if reminder_hours is not None
                                     else os.getenv("REMINDER_HOURS", DEFAULT_REMINDER_HOURS))
         self.profile = profile or VisitProfile.load()
@@ -239,6 +256,8 @@ class Doorstep:
             source=source, sim_ts=self.clock.now().isoformat(timespec="seconds"), real_ts=self.clock.real_now().isoformat(timespec="seconds"),
             package_id=package_id, extra=extra or {},
         )
+        if audience == "caregiver":
+            n.status = self.notifier.send(n)  # sent | logged | failed
         self.store.add_notification(n)
         logger.info("queued %s notification (%s): %s", audience, kind, text)
         return n
@@ -272,7 +291,7 @@ class Doorstep:
             accessible_description=obs["accessible_description"],
             unusual_score=unusual.score if unusual else None,
             unusual_explanation=unusual.explanation if unusual else None,
-            snapshot=obs["snapshot"],
+            snapshot=self.snapshots.publish(obs["snapshot"]),
         )
         outcome = EventOutcome(event=event, unusual=unusual, notifications=list(reminders))
         obs_source = obs["description_source"] or "rules"
@@ -376,5 +395,5 @@ _doorstep: Doorstep | None = None
 def get_doorstep() -> Doorstep:
     global _doorstep
     if _doorstep is None:
-        _doorstep = Doorstep(get_store(), get_clock())
+        _doorstep = Doorstep(get_store(), get_clock(), snapshots=get_snapshots(), notifier=notifier_from_env())
     return _doorstep

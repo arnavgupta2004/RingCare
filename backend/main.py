@@ -252,15 +252,11 @@ async def state() -> dict[str, Any]:
         "clock": doorstep.clock.as_dict(),
         "packages": [p.to_dict() for p in doorstep.store.list_packages()],
         "notifications": [n.to_dict() for n in doorstep.store.list_notifications()],
-        "events": [_event_json(e) for e in doorstep.store.list_events()[-50:]],
+        "events": [{**e.to_dict(), "snapshot_url": doorstep.snapshots.url(e.snapshot)}
+                   for e in doorstep.store.list_events()[-50:]],
+        "backends": {"state": type(doorstep.store).__name__, "snapshots": doorstep.snapshots.name,
+                     "notifier": doorstep.notifier.name},
     }
-
-
-def _event_json(e) -> dict[str, Any]:
-    d = e.to_dict()
-    snap = d.get("snapshot")
-    d["snapshot_url"] = f"/media/{snap}" if snap and snap.startswith("frames/") else None
-    return d
 
 
 def _log_webhook(raw: bytes, headers: dict[str, str]) -> Any:

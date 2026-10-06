@@ -10,3 +10,4 @@ ultralytics==8.4.173
 clip @ git+https://github.com/ultralytics/CLIP.git@a13192f8cb767260d7dfd98c843b0716593169e7
 boto3==1.43.108
 botocore[crt]==1.43.108
+moto[dynamodb,s3,sns]==5.2.3
