@@ -10,43 +10,72 @@
 
 ## Judging criteria → features
 
-> The four criteria names below follow the usual Devpost structure; check them against the hackathon rules page before submitting.
+The four criteria are weighted equally (Tech Implementation breaks ties). The friction log, which can add up to a 10% bonus, is [FRICTION_LOG.md](FRICTION_LOG.md): 12 entries ordered by severity, with feature requests in [docs/FEATURE_REQUESTS.md](docs/FEATURE_REQUESTS.md).
 
-### 1. Technological implementation
-- **Real Ring APIs at runtime:**
-  - **Device discovery:** `GET /v1/devices` (`backend/ring/client.py`, `backend/events.py`).
-  - **WHEP live video:** aiortc, video-only `recvonly`, 1 frame/s, sessions always closed with `DELETE` (`backend/vision/capture.py`).
-  - **Webhooks:** HMAC-SHA256 signature verification over the raw body (`backend/ring/signatures.py`).
-  - **One-way account linking:** nonce matching, App-Integrations `POST` + mandatory `PATCH`, token refresh (`backend/ring/accounts.py`).
-- **Agent:** a Strands agent with 8 tools (`backend/agent/tools.py`) and two brains: deterministic rules, or Claude Haiku 4.5 on Bedrock (`backend/agent/brains.py`). The brain is chosen automatically at startup by `scripts/check_bedrock.sh`. Every tool call and the agent's reason are stored on the event.
-- **Guard rails in code, not just the prompt:** the tools refuse unsafe actions. A capture from a different camera view can never mark a package missing; this is checked with perceptual-hash fingerprints (`backend/vision/fingerprint.py`, measured thresholds in `DECISIONS.md` D6). Alerts must match the package state.
-- **Vision:** YOLO-World open-vocabulary detection for "cardboard box", "package", "parcel", "person", "car", "truck" and "van" (`backend/vision/detect.py`), plus a Bedrock vision description returned as validated strict JSON (`backend/vision/describe.py`).
-- **Tests:** 261 pytest tests. These include store tests run against SQLite **and** DynamoDB (moto), and an agent loop driven by a scripted fake model (`tests/fakes.py`). Account linking is tested against a fake Ring OAuth/API server (`tests/fake_ring.py`).
+### 1. Tech Implementation
+*How well it is built, and how effectively it uses the required APIs, SDKs and device capabilities.*
+- **Ring device capabilities, called at runtime:**
+  - **Live video:** WHEP sessions on the doorbell (aiortc, video-only `recvonly`, 1 frame/s, capture window starting at the first decoded frame, automatic retry, sessions always closed with `DELETE`). In `backend/vision/capture.py`.
+  - **Device discovery:** `GET /v1/devices?include=capabilities` picks the video-capable device (`backend/events.py`).
+  - **Webhooks:** HMAC-SHA256 verification over the raw body; returns 200 immediately and processes in the background (`backend/ring/signatures.py`, `backend/main.py`).
+  - **Account linking (one-way):** sign-in on the Account Link URL, constant-time nonce matching, App-Integrations `POST` + mandatory `PATCH`, refresh tokens with rotation, and a log of which token each call used (`backend/ring/accounts.py`).
+- **AWS SDKs:** Strands Agents (agent loop, 8 tools), Bedrock Converse (vision as strict JSON, Claude Haiku 4.5), DynamoDB, S3 and SNS via boto3. The server runs under a least-privilege IAM user (see AWS Builder below).
+- **Built to be trusted:**
+  - **Guard rails in the tools:** a capture from a different camera view can never mark a package missing (perceptual-hash view fingerprints, thresholds measured on real captures, `backend/vision/fingerprint.py`, DECISIONS.md D6). Alerts must match the package state.
+  - **Fallbacks:** if the model fails or times out, the rules brain finishes the event without duplicate alerts.
+- **Vision:** YOLO-World open-vocabulary detection ("cardboard box", "package", "parcel", "person", "car", "truck", "van"). It found the parcel in 19 of 20 sandbox frames, where a standard COCO model found nothing (DECISIONS.md D1).
+- **Tested:** 261 pytest tests:
+  - **Both stores:** the same store and doorstep tests run against SQLite and DynamoDB (moto).
+  - **Agent:** the real Strands loop is driven by a scripted fake model (`tests/fakes.py`), and the rules brain is proven equivalent to the reference rules.
+  - **Account linking:** tested end to end against a fake Ring OAuth/API server (`tests/fake_ring.py`).
+- **Honest status:** Bedrock is code-complete, but this AWS account can't invoke models yet, so the rules brain and a labelled `stub` description run instead. The switch is automatic. See "What's real and what's simulated".
 
-### 2. Design and user experience
-- **`/resident` (`web/src/pages/Resident.tsx`):**
-  - **Look:** white on black, 24 px base text, a 120 px tall "I picked up the package" button shown only when a package is waiting, and the photo of the waiting package.
-  - **Screen readers:** new updates are announced once through a polite live region, and focus moves sensibly after the button disappears.
-  - **Checked:** 0 axe-core violations (WCAG 2.2 A/AA) at desktop and phone width (`web/scripts/a11y-and-screenshots.mjs`).
-- **`/caregiver` (`web/src/pages/Caregiver.tsx`):**
-  - **Alerts:** each has a snapshot, plain-language explanation, unusual-hour score and the agent's tool calls.
-  - **Source labels:** every item is labelled `bedrock`, `stub` or `rules`, so an automatic estimate is never passed off as a vision-model answer.
-  - **Digest and demo controls:** the daily digest, plus a demo clock and buttons for running a demo.
-- **Language:** messages to the resident are calm and short ("Gentle reminder: the package left at your door at 2:10 PM is still there."). Messages to the caregiver quote their evidence.
+### 2. Design
+*A complete, coherent product experience, with an interaction model that is intuitive for the target device or platform.*
+- **One story from doorbell to people:** a Ring event leads to a capture, an understanding of the scene, the right person being told, and the resident or caregiver acting on it. Package: arrival message → gentle reminder after 3 h → one-tap "I picked it up" → or a possible-theft alert if it vanishes. Visits: unusual-hour alerts and a daily digest.
+- **`/resident`, designed for older, low-vision users** (`web/src/pages/Resident.tsx`):
+  - **Look:** white on black, 24 px base text, one large action (a 120 px "I picked up the package" button, shown only when a package is waiting), and the photo of that package.
+  - **Screen readers:** updates are announced once through a polite live region, and focus moves sensibly after the button disappears.
+  - **Checked:** 0 axe-core violations (WCAG 2.2 A/AA) at desktop and phone width.
+- **`/caregiver`, built around evidence** (`web/src/pages/Caregiver.tsx`):
+  - **Alerts:** each shows a snapshot, a plain explanation, the unusual-hour score and the agent's reasoning with every tool call.
+  - **Source labels:** every item is labelled `bedrock`, `stub` or `rules`.
+  - **Digest:** the daily digest is shown here and also emailed.
+- **The Ring side of the experience:** a sign-in page on the Account Link URL, and a status page on the App Homepage URL (account ID, token expiry, Disconnect).
+- **Voice:** messages to the resident are calm and short ("Gentle reminder: the package left at your door at 2:10 PM is still there."). Messages to the caregiver quote their evidence.
 
-### 3. Potential impact
-- **The problem:** missed or stolen deliveries, and not knowing who came to the door, hit people with low vision or reduced mobility hardest. Their caregivers are often far away.
-- **What it does about it:**
-  - **Collect the package:** an arrival message and a gentle reminder 3 hours later (`backend/doorstep.py`).
-  - **Possible-theft alert:** only when the *same camera view* shows the package gone and nobody marked it picked up.
-  - **Unusual-hour alerts:** scored against this home's own visit pattern (`config/visit_profile.json`).
-  - **Daily digest:** a summary for the caregiver by email.
-- **Any Ring doorbell:** it works through standard Ring APIs, with no extra hardware.
+### 3. Potential Impact
+*A credible, specific case for solving customer needs, and an audience beyond the hackathon.*
+- **The customer need:**
+  - **The resident:** someone living alone with low vision or limited mobility can't easily see what's at the door, whether a delivery arrived, or whether it's still there.
+  - **The caregiver:** a family member who lives elsewhere wants to know when something is wrong, not get every motion alert.
+- **What DoorSight does about it:**
+  - **Turns events into plain answers:** "a package is at your door".
+  - **Reminds before parcels are forgotten:** a gentle reminder after 3 hours (`backend/doorstep.py`).
+  - **Alerts the caregiver only when it matters:** a possible missing package confirmed from the arrival view, or activity at an hour that is unusual *for this home* (`config/visit_profile.json` plus observed visits).
+  - **Sends a daily digest** instead of a stream of notifications.
+- **Beyond the hackathon:**
+  - **Any Ring doorbell:** it uses standard Ring APIs and needs no extra hardware.
+  - **Real-account linking:** implemented; it awaits a Ring Protect account to verify live.
+  - **Ready for production use:**
+    - **Data:** on-demand DynamoDB, private S3 with 30-day expiry, and a least-privilege IAM user.
+    - **Cost:** no always-on infrastructure.
 
-### 4. Quality of the idea
-- **Ring events become household context:** what's at the door now, what happened earlier, and whether this hour is normal for this home.
-- **Two audiences, two voices:** the resident needs reassurance and one clear action; the caregiver needs evidence. The same events produce both.
-- **Honest by design:** the source labels, the camera-view check and the "no reference view, can't verify" outcomes keep the system from claiming certainty it doesn't have.
+### 4. Quality of the Idea
+*A creative use of the required tools, and a genuine understanding of the developer ecosystem and end-user needs.*
+- **Ring's creative examples it covers:**
+  - **Accessibility aid:** a screen-reader-first, large-text resident view.
+  - **Caretaking:** remote caregiver alerts and a daily digest.
+  - **Package/delivery management:** arrival, reminder, pickup, possible-missing.
+  - **Event-based triggers:** every Ring event starts the agent.
+  - **Multi-camera (partly):** the package logic tracks which camera view a package arrived in, so captures from another camera can't trigger false alarms.
+- **Non-security by design:** the goal is independence and reassurance, not surveillance.
+  - **Resident wording:** the resident never sees scores or alarm words.
+  - **Caregiver wording:** caregiver alerts say "possible missing package", not "stolen". That is fixed in the rules templates; for a Bedrock brain it is set by the agent's instructions.
+- **Ecosystem understanding:**
+  - **Docs:** every endpoint detail came from the Ring Appstore MCP docs.
+  - **Friction log:** sandbox limits are documented with reproduction steps (12 entries).
+  - **Workarounds without hiding gaps:** `/simulate-event` reuses the real webhook path, and linking is tested against a fake Ring server.
 
 ### AWS Builder challenge
 
