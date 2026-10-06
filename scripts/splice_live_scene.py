@@ -15,6 +15,7 @@ resident view, and the agent's reasoning. Then run:
 from __future__ import annotations
 
 import json
+import os
 import subprocess
 import sys
 import tempfile
@@ -31,9 +32,16 @@ ENCODE = ["-c:v", "libx264", "-preset", "medium", "-crf", "18", "-pix_fmt", "yuv
 BADGE = (f"drawtext=fontfile='{FONT}':text='LIVE from Ring sandbox':fontsize=34:fontcolor=white:"
          "box=1:boxcolor=0xD7263D@0.92:boxborderw=14:x=w-tw-44:y=40")
 
+# The console beat is cropped to the Playground's Live Stream dialog: the page behind it shows the
+# sandbox token. Region in the 1920x1080 recording (Ring console at 125% zoom); check a frame
+# after each recording, since it depends on where the dialog opens.
+CONSOLE_CROP = os.getenv("CONSOLE_CROP", "1130:540:500:325")  # w:h:x:y
+CONSOLE_LABEL = (f"drawtext=fontfile='{FONT}':text='Ring developer console · Playground · Package':fontsize=30:"
+                 "fontcolor=white:box=1:boxcolor=black@0.75:boxborderw=12:x=44:y=40")
+
 # (marker, start offset, end offset) in seconds, relative to markers in live_timeline.json
 BEATS = [
-    ("click",     "playground_clicked", -3.0, 5.0),   # the Playground, the Package click, the clip switching
+    ("click",     "playground_clicked", 0.8, 7.0),    # Ring Playground: the Live Stream dialog after the click
     ("trigger",   "trigger",           -2.0, 4.0),   # DoorSight: "Simulate package" → capturing live video
     ("result",    "done",              -1.5, 1.5),   # the new event lands (wait in between is cut)
     ("yolo",      "yolo",               0.3, 6.8),   # fresh frame with YOLO-World's box
@@ -50,7 +58,9 @@ def main() -> int:
     full = json.loads((ROOT / "video" / "timeline.json").read_text())["scene_offsets_s"]
     live = json.loads((ROOT / "video" / "live_timeline.json").read_text())
     marks = live["marks_s"]
-    full_raw, live_raw = ROOT / "video" / "raw" / "demo_raw.webm", ROOT / "video" / "raw" / "live_package.webm"
+    files = live.get("files") or {"doorsight": {"file": "live_package.webm", "start_s": 0.0}}
+    files.setdefault("console", files["doorsight"])
+    full_raw = ROOT / "video" / "raw" / "demo_raw.webm"
     scenes = load_scenes()
     order = [s["id"] for s in scenes]
     i_pkg = order.index("package")
@@ -71,16 +81,20 @@ def main() -> int:
     cut_s = (marks["done"] - 1.5) - (marks["trigger"] + 4.0)
     pkg_len = 0.0
     for n, (name, marker, a, b) in enumerate(BEATS, start=1):
-        start = max(0.0, marks[marker] + a)
+        role = "console" if name == "click" else "doorsight"
+        src, offset = ROOT / "video" / "raw" / files[role]["file"], files[role]["start_s"]
+        start = max(0.0, marks[marker] + a - offset)
+        length = marks[marker] + b - offset - start
         if name == "click":
-            start = max(start, marks["playground_ready"])
-        length = marks[marker] + b - start
-        vf = f"fps=30,scale=1920:1080,{BADGE}"
+            vf = (f"fps=30,crop={CONSOLE_CROP},scale=1920:1080:force_original_aspect_ratio=decrease,"
+                  f"pad=1920:1080:(ow-iw)/2:(oh-ih)/2:color=0x0b0d12,{BADGE},{CONSOLE_LABEL}")
+        else:
+            vf = f"fps=30,scale=1920:1080,{BADGE}"
         if name == "result" and cut_s > 1:
             vf += (f",drawtext=fontfile='{FONT}':text='live capture shortened by {cut_s:.0f} s':fontsize=30:"
                    "fontcolor=white:box=1:boxcolor=black@0.75:boxborderw=12:x=44:y=40")
         out = work / f"{n:02d}_{name}.mp4"
-        ffmpeg("-ss", f"{start:.3f}", "-t", f"{length:.3f}", "-i", str(live_raw), "-vf", vf, *ENCODE, str(out))
+        ffmpeg("-ss", f"{start:.3f}", "-t", f"{length:.3f}", "-i", str(src), "-vf", vf, *ENCODE, str(out))
         parts.append(out)
         pkg_len += duration(out)
         print(f"live beat {name:9s} {length:5.1f}s")

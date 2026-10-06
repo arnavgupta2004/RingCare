@@ -289,7 +289,7 @@ The Ring sandbox live-view clips are stock footage licensed under [CC BY 4.0](ht
 | Clip (as streamed by the sandbox) | Title, author, source | License |
 |-|-|-|
 | Snowy bird feeders (default view) | _(to fill in)_ | CC BY 4.0 |
-| Front step with a parcel ("Package") | _(to fill in)_ | CC BY 4.0 |
+| Front step with a parcel ("Package") | "Thief stealing our package" by YouTube user frollard, clipped from original (link: _(copy from the Ring Playground)_) | CC BY 4.0 |
 | Parking lot and driveway ("Vehicle") | _(to fill in)_ | CC BY 4.0 |
 
 ## License

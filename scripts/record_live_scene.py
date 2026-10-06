@@ -17,6 +17,7 @@ scripts/splice_live_scene.py then cuts the scene from it and splices it into the
 from __future__ import annotations
 
 import base64
+import getpass
 import json
 import sys
 import time
@@ -68,6 +69,22 @@ def token_minutes_left() -> float:
     return (exp - time.time()) / 60
 
 
+def refresh_token_prompt() -> None:
+    """Let the user paste a fresh sandbox token (hidden input) right before the capture."""
+    left = token_minutes_left()
+    pasted = getpass.getpass(
+        f"\n>>> Sandbox token: {left:.0f} min left. Generate a fresh one in the Playground and paste it here\n"
+        "    (input is hidden; just press Enter to keep the current one): ").strip()
+    if pasted:
+        env = ROOT / ".env"
+        lines = [l for l in env.read_text().splitlines() if not l.startswith("RING_ACCESS_TOKEN=")]
+        env.write_text("\n".join(lines + [f"RING_ACCESS_TOKEN={pasted}"]) + "\n")
+    left = token_minutes_left()
+    print(f"    token: {left:.0f} min left")
+    if left < 3:
+        raise SystemExit("The sandbox token expires in under 3 minutes; generate a fresh one and run this again.")
+
+
 def annotate_live_frame(event: dict) -> dict:
     """Draw YOLO-World's detections on the event's representative (fresh) frame for the video."""
     from backend.vision.detect import _load_model
@@ -101,9 +118,12 @@ def run() -> None:
     _load_model()
 
     RAW_DIR.mkdir(parents=True, exist_ok=True)
-    for old in RAW_DIR.glob("live_*.webm"):
+    for old in [*RAW_DIR.glob("live_*.webm"), *RAW_DIR.glob("page@*.webm")]:
         old.unlink()
     marks: dict[str, float] = {}
+
+    t_ref = time.monotonic()
+    pages: list[dict] = []  # every tab gets its own recording; remember when each started
 
     with sync_playwright() as pw:
         context = pw.chromium.launch_persistent_context(
@@ -111,18 +131,21 @@ def run() -> None:
             viewport={"width": 1920, "height": 1080}, screen={"width": 1920, "height": 1080},
             record_video_dir=str(RAW_DIR), record_video_size={"width": 1920, "height": 1080})
         context.add_init_script(INIT_SCRIPT)
+        context.on("page", lambda p: pages.append({"page": p, "start": round(time.monotonic() - t_ref, 3)}))
+        for p in context.pages:
+            pages.append({"page": p, "start": 0.0})
         page = context.pages[0] if context.pages else context.new_page()
-        page_start = time.monotonic()
 
         def mark(name: str) -> None:
-            marks[name] = round(time.monotonic() - page_start, 3)
+            marks[name] = round(time.monotonic() - t_ref, 3)  # seconds since the browser started
             print(f"  [{marks[name]:7.1f}s] {name}")
 
         page.goto(RING_CONSOLE)
         input("\n>>> In the Chrome window: sign in to the Ring developer console (if asked) and open the\n"
-              "    Playground with the live preview, IN THIS SAME TAB. Make sure no token, secret or\n"
-              "    email is visible on screen. Then press Enter here… ")
+              "    Playground. Then press Enter here… ")
         mark("playground_ready")
+        console = next((p["page"] for p in pages if "amazon" in (p["page"].url or "")), page)
+        refresh_token_prompt()
 
         # Fresh state and clock, as in the full take (package arrives at 2:10 PM).
         from backend.store import store_from_env
@@ -132,6 +155,7 @@ def run() -> None:
 
         input("\n>>> Now CLICK 'Package' in the Playground. As soon as you've clicked, press Enter here… ")
         mark("playground_clicked")
+        console = next((p["page"] for p in pages if "amazon" in (p["page"].url or "")), console)
         time.sleep(6)  # let the clip switch on screen (and avoid the first-capture stall)
 
         page.goto(f"{WEB}/caregiver", wait_until="domcontentloaded")
@@ -180,16 +204,28 @@ def run() -> None:
         time.sleep(9.5)
         mark("end")
 
-        video = page.video
+        starts = {id(p["page"]): p["start"] for p in pages}
+        sources = {"doorsight": (page, RAW_DIR / "live_package.webm"),
+                   "console": (console, RAW_DIR / "live_console.webm")}
+        videos = {role: (p.video, starts.get(id(p), 0.0), target) for role, (p, target) in sources.items()}
         context.close()
-        target = RAW_DIR / "live_package.webm"
-        Path(video.path()).rename(target)
+        files = {}
+        for role, (video, start, target) in videos.items():
+            path = Path(video.path())
+            if path.exists() and not target.exists():
+                path.rename(target)
+            elif not path.exists() and role == "console":
+                target = RAW_DIR / "live_package.webm"  # same tab as DoorSight
+            files[role] = {"file": target.name, "start_s": start}
 
     (ROOT / "video" / "live_timeline.json").write_text(json.dumps(
-        {"marks_s": marks, "event": {k: event.get(k) for k in ("event_id", "frame_count", "package_seen",
-                                                                "frame_source", "agent_brain", "agent_reason")},
+        {"marks_s": marks, "files": files,
+         "event": {k: event.get(k) for k in ("event_id", "frame_count", "package_seen",
+                                             "frame_source", "agent_brain", "agent_reason")},
          "live_frame": live}, indent=2, default=str))
-    print(f"\nraw: {target}\nmarkers: video/live_timeline.json\nNext: python scripts/splice_live_scene.py")
+    for old in RAW_DIR.glob("page@*.webm"):
+        old.unlink()
+    print(f"\nrecordings: {files}\nmarkers: video/live_timeline.json\nNext: python scripts/splice_live_scene.py")
 
 
 if __name__ == "__main__":

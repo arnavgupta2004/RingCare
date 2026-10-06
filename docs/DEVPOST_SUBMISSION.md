@@ -142,7 +142,7 @@ https://github.com/arnavgupta2004/RingCare/blob/main/FRICTION_LOG.md: 12 entries
 >
 > The Ring sandbox video clips shown are stock footage licensed under CC BY 4.0:
 > - **[YOU]** Bird feeder clip: title, author, link
-> - **[YOU]** Front-step package clip: title, author, link
+> - "Thief stealing our package" by YouTube user frollard, CC BY 4.0, clipped from original. **[YOU]** add the link (shown in the Ring Playground)
 > - **[YOU]** Parking-lot vehicle clip: title, author, link
 >
 > Demo footage replays real Ring sandbox captures through the live DoorSight server; the agent runs on its rules brain while Bedrock access is pending.
