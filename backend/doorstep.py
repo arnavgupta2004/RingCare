@@ -479,17 +479,20 @@ class Doorstep:
     # daily digest
 
     def digest_period(self, day: str | None = None) -> tuple[datetime, datetime]:
-        """`day` = "YYYY-MM-DD" (home-local calendar day); default = the 24 hours ending now (sim)."""
+        """`day` = "YYYY-MM-DD" (home-local calendar day); default = the 24 hours ending now (sim).
+
+        Both ends are inclusive, so an event recorded in the same second the digest runs is counted.
+        """
         if day:
             start = datetime.fromisoformat(day).replace(tzinfo=self.clock.tz)
-            return start, start + timedelta(days=1)
-        end = self.clock.now()
+            return start, start + timedelta(days=1) - timedelta(seconds=1)
+        end = self.clock.now().replace(microsecond=0)
         return end - timedelta(days=1), end
 
     def digest_facts(self, start: datetime, end: datetime) -> dict[str, Any]:
         """Everything the caregiver digest says, computed from stored state only."""
         def within(ts: str | None) -> bool:
-            return bool(ts) and start <= datetime.fromisoformat(ts) < end
+            return bool(ts) and start <= datetime.fromisoformat(ts) <= end
 
         events = [e for e in self.store.list_events() if within(e.sim_ts)]
         packages = self.store.list_packages()
