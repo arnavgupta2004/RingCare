@@ -21,7 +21,7 @@ from PIL import Image
 logger = logging.getLogger("vision.describe")
 
 AWS_REGION = os.getenv("AWS_REGION", "us-east-1")
-DEFAULT_MODEL_ID = "us.anthropic.claude-opus-5-5"
+DEFAULT_MODEL_ID = "us.anthropic.claude-haiku-4-5-20251001-v1:0"
 MAX_IMAGE_WIDTH = 1024
 FRAMES_PER_REQUEST = 3
 
@@ -37,7 +37,7 @@ REQUIRED_FIELDS: dict[str, type | tuple[type, ...]] = {
 
 SYSTEM_PROMPT = """You analyse doorbell camera frames for DoorSight, an assistant for elderly and low-vision residents.
 You receive a few frames from one short live-video capture, in time order, plus counts from a local object detector.
-The detector uses generic COCO classes: it cannot detect cardboard boxes or parcels, and it often misses small or partly hidden objects, so trust what you see in the images over the detector when they disagree.
+The detector is an open-vocabulary model prompted with a few class names; it often misses small or partly hidden objects and sometimes mislabels posts or shadows, so trust what you see in the images over the detector when they disagree.
 Ignore on-screen overlays such as logos, device IDs, partner names and timestamps.
 Describe only what is visible. Do not guess identities, intentions or anything outside the frames."""
 
@@ -160,6 +160,7 @@ def describe_scene(
         try:
             result = parse_strict_json(text)
             return {
+                "source": "bedrock",
                 "model_id": model_id,
                 "frames_sent": [p.name for p in chosen],
                 "usage": response.get("usage"),
@@ -173,3 +174,66 @@ def describe_scene(
                 {"role": "user", "content": [{"text": f"That reply was invalid ({exc}). Reply with only the JSON object."}]},
             ]
     raise DescribeError(f"no valid JSON after 2 attempts: {last_error}")
+
+
+# --- Stand-in when Bedrock is unavailable -------------------------------------
+
+# A group counts as "visible" only if it shows up in at least this share of frames;
+# single-frame low-confidence hits (e.g. a mailbox post labelled "person") are ignored.
+STUB_MIN_FRAME_FRACTION = 0.3
+# Stub confidence is capped so nothing downstream mistakes it for a vision-model answer.
+STUB_MAX_CONFIDENCE = 0.6
+
+_STUB_PHRASES = {
+    "package": "there seems to be a package at your door",
+    "person": "someone may be at your door",
+    "vehicle": "a vehicle can be seen near your home",
+}
+
+
+def stub_description(detections: dict[str, Any] | None, event_type: str, reason: str) -> dict[str, Any]:
+    """Detector-only stand-in with the same result fields as describe_scene, marked source="stub"."""
+    summary = (detections or {}).get("summary", {})
+    frames = (detections or {}).get("frames", [])
+    n = len(frames) or 1
+    visible = {g: summary.get(g, {}).get("frame_fraction", 0.0) >= STUB_MIN_FRAME_FRACTION for g in _STUB_PHRASES}
+
+    label_frames: dict[str, set[int]] = {}
+    for f in frames:
+        for d in f["detections"]:
+            label_frames.setdefault(d["label"], set()).add(f["index"])
+    objects = sorted(l for l, idx in label_frames.items() if len(idx) / n >= STUB_MIN_FRAME_FRACTION)
+
+    seen = [g for g in ("package", "person", "vehicle") if visible[g]]
+    if seen:
+        parts = [_STUB_PHRASES[g] for g in seen]
+        sentence = (parts[0][0].upper() + parts[0][1:]) if len(parts) == 1 else \
+            (", ".join(parts[:-1]) + " and " + parts[-1]).capitalize()
+        accessible = sentence + "."
+        conf = sum(summary[g]["best_confidence"] for g in seen) / len(seen)
+        facts = "; ".join(
+            f"{g} in {len(summary[g]['frames_present'])} of {n} frames (best {summary[g]['best_confidence']:.2f})"
+            for g in seen
+        )
+        scene = f"Local detector only, no vision-language model: {facts}."
+    else:
+        accessible = "Nothing was clearly spotted at your door."
+        conf = 0.3
+        scene = "Local detector only, no vision-language model: nothing detected consistently."
+
+    return {
+        "source": "stub",
+        "model_id": None,
+        "reason": reason,
+        "frames_sent": [],
+        "usage": None,
+        "result": {
+            "scene_summary": scene,
+            "objects_present": objects,
+            "package_visible": visible["package"],
+            "vehicle_visible": visible["vehicle"],
+            "people_visible": visible["person"],
+            "confidence": round(min(STUB_MAX_CONFIDENCE, conf), 2),
+            "accessible_description": accessible,
+        },
+    }

@@ -31,7 +31,7 @@ def main() -> int:
         record["detections"] = {k: v for k, v in record["detections"].items() if k != "frames"}
     print(json.dumps(record, indent=2, default=str))
     print(f"\nsaved: {analysis_path(event_id)}")
-    return 0 if "error" not in record.get("description", {}) else 1
+    return 0 if "description" in record else 1
 
 
 if __name__ == "__main__":

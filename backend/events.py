@@ -120,7 +120,8 @@ async def handle_event(event: DoorEvent) -> dict[str, Any]:
                 analysis = await asyncio.to_thread(
                     analyze_event, event.event_id, event.event_type, out_dir, "ring_whep"
                 )
-                record["analysis"] = (analysis.get("description") or {}).get("result")
+                desc = analysis.get("description") or {}
+                record["analysis"] = {"source": desc.get("source"), **(desc.get("result") or {})}
         except Exception as exc:
             logger.error("event %s: capture failed: %s", event.event_id, exc)
             record["capture"] = {"error": str(exc), "frame_count": 0}

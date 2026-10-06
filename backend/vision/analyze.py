@@ -10,7 +10,7 @@ from pathlib import Path
 from typing import Any
 
 from backend.config import get_settings
-from backend.vision.describe import DescribeError, describe_scene
+from backend.vision.describe import DescribeError, describe_scene, stub_description
 from backend.vision.detect import detect_frames
 
 logger = logging.getLogger("vision.analyze")
@@ -40,8 +40,10 @@ def analyze_event(event_id: str, event_type: str, frames_dir: Path, source: str 
         try:
             record["description"] = describe_scene(frames, event_type, detections)
         except DescribeError as exc:
-            logger.error("event %s: description failed: %s", event_id, exc)
-            record["description"] = {"error": str(exc)}
+            logger.warning("event %s: Bedrock unavailable, using stub description: %s", event_id, exc)
+            record["description"] = stub_description(detections, event_type, reason=str(exc))
+        # Top-level copy so any UI can label stub output without digging.
+        record["description_source"] = record["description"]["source"]
 
     out = analysis_path(event_id)
     out.parent.mkdir(parents=True, exist_ok=True)
