@@ -1,0 +1,8 @@
+{
+  "_comment": "Prior visits per hour of day for vehicle/motion events, before any events are observed. Observed events are added on top. Hours are home-local (HOME_TZ).",
+  "quiet_start_hour": 22,
+  "quiet_end_hour": 6,
+  "quiet_hour_prior": 0.2,
+  "active_hour_prior": 3.0,
+  "unusual_threshold": 0.7
+}
