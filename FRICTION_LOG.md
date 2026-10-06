@@ -128,3 +128,14 @@ Severity: High = blocks progress, Medium = costs real time or risks a wrong impl
 | Severity | Medium |
 | Workaround | Disconnect pauses the integration, deletes DoorSight's tokens, and tells the user how to remove DoorSight in the Ring app; the `app_integration_removed` webhook deletes tokens if they remove it there first |
 | Suggestion | Allow DELETE for one-way apps too (or document why not on the App Homepage URL guidance), and add per-account disconnect to the private-app Connect step |
+
+### 12. Live account linking blocked at the Connect step (Ring Protect plan required)
+
+| Field | Detail |
+|-|-|
+| Task | Test the real one-way account linking flow on the private app |
+| Steps | Set the Account Link, App Homepage, Token Exchange and Webhook URLs (public HTTPS via ngrok); app overview → Connect → Log in with Ring → signed in with a Ring account |
+| Expected vs actual | Expected Ring to POST an authorization code to the Token Exchange URL and redirect to the Account Link URL. Ring stopped the flow inside the Connect step; our server never received a request on `/token` or `/link` (confirmed in the server log). Ring's message: _(exact wording to be added)_. The docs say connected accounts need a Ring Protect plan or an active Ring trial |
+| Severity | High — the complete linking flow cannot be verified live without a paid plan or trial on a Ring account |
+| Workaround | Kept the full implementation and verified it end to end against a fake Ring server (OAuth code exchange, refresh with rotation, `/v1/users/me`, App-Integrations POST/PATCH, nonce generation), 53 tests. The app runs on the sandbox token |
+| Suggestion | Let the sandbox/Playground account complete the Connect step (with the Playground Device), or exempt developer test accounts from the subscription check, so partners can verify account linking before certification |

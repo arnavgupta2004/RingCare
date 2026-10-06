@@ -12,7 +12,7 @@ A Ring doorstep assistant for elderly and low-vision residents. Each Ring event 
 - [x] Step 4 — Doorstep state (SQLite), package lifecycle, unusual-hour scoring, demo clock
 - [x] Step 5 — Strands agent (rules brain now; Bedrock brain switches on automatically) + SNS caregiver alerts + daily digest
 - [x] Step 6 — Resident and caregiver web views (React + Vite, axe-checked)
-- [x] Step 7 — Real one-way account linking (sign-in, nonce, POST/PATCH app-integrations, token refresh, disconnect)
+- [x] Step 7 — Real one-way account linking (sign-in, nonce, POST/PATCH app-integrations, token refresh, disconnect) — verified against a fake Ring server; see below
 - [ ] Step 8 — Docs, architecture diagram, demo
 
 ## Quick start
@@ -75,6 +75,10 @@ python scripts/demo_story.py
 ```
 
 Runs the story against real sandbox captures in a separate `data/demo.db`: package arrives (sim 2:10 PM) → clock +3 h → reminder → resident pickup → vehicle at sim 03:00 → unusual-hour caregiver alert.
+
+## Account linking status
+
+The full one-way linking flow is implemented: sign-in on `/link`, nonce matching, App-Integrations POST and PATCH, per-account tokens with refresh, and Disconnect on `/home`. It is **verified end to end against a fake Ring server** (`tests/fake_ring.py`, 53 tests covering nonce validation, token exchange, refresh and disconnect), not against live Ring. Live linking through the console's Connect step requires a Ring account with a **Ring Protect plan** (or an active Ring trial), which the test account doesn't have (friction log #12). Until an account is linked, DoorSight uses the sandbox token (`RING_ACCESS_TOKEN`) for all Ring API calls.
 
 ## Agent
 
