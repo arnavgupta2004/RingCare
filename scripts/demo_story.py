@@ -13,8 +13,11 @@ Pass --db data/doorsight.db to load the story into the live server's database in
 Frames and analyses come from earlier sandbox captures (data/frames, data/analysis);
 missing analyses are computed with the step-3 pipeline (Bedrock, else the stub).
 
+With --aws, state goes to DynamoDB (DYNAMODB_TABLE, emptied first), snapshots to S3
+(S3_BUCKET) and caregiver alerts to SNS (SNS_TOPIC_ARN); run scripts/aws_setup.sh first.
+
 Usage:
-    python scripts/demo_story.py [--package-capture DIR] [--vehicle-capture DIR]
+    python scripts/demo_story.py [--package-capture DIR] [--vehicle-capture DIR] [--db FILE | --aws]
 """
 
 from __future__ import annotations
@@ -32,7 +35,10 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from backend.clock import DemoClock  # noqa: E402
 from backend.config import PROJECT_ROOT  # noqa: E402
 from backend.doorstep import Doorstep, fmt_time  # noqa: E402
-from backend.store import SQLiteStore  # noqa: E402
+from backend.config import get_settings  # noqa: E402
+from backend.notify import LogNotifier, SNSNotifier  # noqa: E402
+from backend.snapshots import LocalSnapshots, S3Snapshots  # noqa: E402
+from backend.store import SQLiteStore, StateStore  # noqa: E402
 from backend.vision.analyze import analysis_path, analyze_event  # noqa: E402
 
 FRAMES = PROJECT_ROOT / "data" / "frames"
@@ -74,14 +80,32 @@ def main() -> int:
     parser.add_argument("--package-capture", type=Path, default=FRAMES / "sim-package-1791250581919")
     parser.add_argument("--vehicle-capture", type=Path, default=FRAMES / "sim-vehicle-1791250656310")
     parser.add_argument("--db", type=Path, default=DEMO_DB, help="SQLite file to write (emptied first)")
+    parser.add_argument("--aws", action="store_true", help="use DynamoDB + S3 + SNS from .env")
     parser.add_argument("--until", choices=["arrival", "reminder", "pickup", "night"], default="night",
                         help="stop after this step (e.g. 'reminder' leaves the package waiting, for the UI)")
     args = parser.parse_args()
 
-    store = SQLiteStore(args.db)
+    if args.aws:
+        import os
+
+        from backend.store.dynamodb import DynamoDBStore
+
+        get_settings()  # load .env
+        missing = [k for k in ("DYNAMODB_TABLE", "S3_BUCKET", "SNS_TOPIC_ARN") if not os.getenv(k)]
+        if missing:
+            sys.exit(f"--aws needs {', '.join(missing)} in .env; run scripts/aws_setup.sh first")
+        store: StateStore = DynamoDBStore()
+        snapshots = S3Snapshots(os.environ["S3_BUCKET"])
+        notifier = SNSNotifier(os.environ["SNS_TOPIC_ARN"], fallback=LogNotifier(get_settings().logs_dir / "notifications.log"))
+        where = f"DynamoDB table {store.table_name}, S3 bucket {snapshots.bucket}, SNS topic {notifier.topic_arn}"
+    else:
+        store = SQLiteStore(args.db)
+        snapshots, notifier = LocalSnapshots(), LogNotifier()
+        where = f"SQLite {args.db}, local snapshots, log-only alerts"
     store.clear()  # not unlink: a running server may hold the file open
+    print(f"Backends: {where}")
     clock = DemoClock(tz="Asia/Kolkata")
-    ds = Doorstep(store, clock, reminder_hours=3)
+    ds = Doorstep(store, clock, reminder_hours=3, snapshots=snapshots, notifier=notifier)
     today = clock.now().date()
 
     pkg_analysis = load_analysis(args.package_capture, "package")
@@ -104,7 +128,7 @@ def main() -> int:
     assert status == "present", "a different camera view must not change the package state"
 
     if args.until == "arrival":
-        return finish(store, clock, args.db)
+        return finish(store, clock, where, snapshots)
 
     step("2. Advance demo clock to 3 h after arrival")
     clock.advance((arrived + timedelta(hours=3) - clock.now()).total_seconds())
@@ -113,24 +137,24 @@ def main() -> int:
         print(f"  notify  [{n.audience}/{n.kind}] {n.text}")
 
     if args.until == "reminder":
-        return finish(store, clock, args.db)
+        return finish(store, clock, where, snapshots)
 
     step('3. Resident presses "I picked up the package"')
     pkg = ds.mark_picked_up(package_id)
     print(f"  package {pkg.id} -> {pkg.status.value} at sim {pkg.resolved_sim_ts}")
 
     if args.until == "pickup":
-        return finish(store, clock, args.db)
+        return finish(store, clock, where, snapshots)
 
     step("4. Vehicle event (sim 03:00 next day)")
     clock.set(datetime.combine(today + timedelta(days=1), datetime.min.time()).replace(hour=3))
     out = ds.record_event(f"demo-night-{args.vehicle_capture.name}", "vehicle", analysis=veh_analysis, source="demo")
     show_outcome(out)
 
-    return finish(store, clock, args.db)
+    return finish(store, clock, where, snapshots)
 
 
-def finish(store: SQLiteStore, clock: DemoClock, db: Path) -> int:
+def finish(store: StateStore, clock: DemoClock, where: str, snapshots) -> int:
     step("Final state")
     print(f"  demo clock: {clock.as_dict()['sim_now']} (offset {clock.offset_s / 3600:+.2f} h)")
     print("  packages:")
@@ -142,11 +166,17 @@ def finish(store: SQLiteStore, clock: DemoClock, db: Path) -> int:
         score = f"  unusual={e.unusual_score}" if e.unusual_score is not None else ""
         check = f"  [{e.package_check}]" if e.package_check else ""
         print(f"    {e.sim_ts}  {e.event_type:<8} {e.event_id}{score}{check}")
+        print(f"      snapshot {e.snapshot}")
     print("  notifications:")
     for n in store.list_notifications():
-        print(f"    {n.sim_ts}  {n.audience:<9} {n.kind:<16} source={n.source:<5} event={n.event_id}")
+        sent = f"  sns={n.extra['sns_message_id']}" if n.extra.get("sns_message_id") else ""
+        print(f"    {n.sim_ts}  {n.audience:<9} {n.kind:<16} source={n.source:<5} status={n.status}{sent}")
         print(textwrap.indent(textwrap.fill(n.text, 96), "      "))
-    print(f"\n  database: {db}")
+    latest = next((e for e in reversed(store.list_events()) if e.snapshot), None)
+    if latest:
+        url = snapshots.url(latest.snapshot) or ""
+        print(f"\n  UI snapshot URL for the latest event: {url[:110]}{'…' if len(url) > 110 else ''}")
+    print(f"  backends: {where}")
     return 0
 
 
