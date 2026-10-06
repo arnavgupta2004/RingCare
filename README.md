@@ -7,7 +7,7 @@ A Ring doorstep assistant for elderly and low-vision residents. Each Ring event 
 ## Status
 
 - [x] Step 1 — FastAPI backend with the Ring console endpoints, Amazon Vision API client, webhook HMAC verification
-- [ ] Step 2 — WHEP live-video frame capture
+- [x] Step 2 — WHEP live-video frame capture (aiortc, 1 frame/s, up to 20 s)
 - [ ] Step 3 — Object detection + scene description
 - [ ] Step 4 — Doorstep state and package lifecycle
 - [ ] Step 5 — Agent + caregiver alerts
@@ -40,7 +40,16 @@ ngrok http --url=<your-static-domain>.ngrok-free.app 8000
 | `GET /home` | App Homepage URL | Connection status |
 | `POST /token` | Token Exchange URL | Receives the form-encoded auth code, exchanges it at `https://oauth.ring.com/oauth/token`, looks up the Account ID via `GET /v1/users/me`, stores tokens in `data/tokens.json` |
 | `POST /webhook` | Webhook URL | Verifies `X-Signature: sha256=<hex>` over the raw body, returns 200 immediately, logs the payload to `logs/webhooks.jsonl` |
+| `POST /simulate-event` | — | Dev trigger (`{"event_type": "package"\|"vehicle"\|"motion", "wait": false}`). Builds a v1.1-shaped event and runs it through the same handler as `/webhook`, which starts a WHEP capture to `data/frames/<event_id>/` |
 | `GET /health` | — | Liveness |
+
+## Frame capture
+
+`backend/vision/capture.py` opens a video-only (`recvonly`) WHEP session on the device, saves one JPEG per second for up to 20 s, then closes the peer connection and DELETEs the session. The sandbox token is re-read from `.env` on each capture, so a regenerated token works without a restart.
+
+```bash
+curl -X POST localhost:8000/simulate-event -H 'Content-Type: application/json' -d '{"event_type":"package","wait":true}'
+```
 
 ## Credits
 

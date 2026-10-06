@@ -95,3 +95,25 @@ Severity: High = blocks progress, Medium = costs real time or risks a wrong impl
 | Severity | Low |
 | Workaround | Used the key as-is; added a unit test that pins this behaviour |
 | Suggestion | Show this note next to the key in the console, not only in the docs |
+
+### 9. Playground simulator buttons don't send webhooks
+
+| Field | Detail |
+|-|-|
+| Task | Confirm that simulated sandbox events reach the registered Webhook URL |
+| Steps | Registered `/webhook` (public HTTPS via ngrok static domain) in the private-app Account Linking form; server running and reachable (`/health` OK through ngrok); clicked **Package** and **Motion** in the console Playground simulator; watched the ngrok inspector and `logs/webhooks.jsonl` |
+| Expected vs actual | Expected a signed v1.1 `motion_detected` (or package) POST to `/webhook` per click. Nothing arrived — the ngrok inspector showed only our own GET requests, and `logs/webhooks.jsonl` stayed empty |
+| Severity | High |
+| Workaround | Added `POST /simulate-event {event_type: package\|vehicle\|motion}`, which builds the same v1.1-shaped payload and passes it through the same handler as `/webhook` |
+| Suggestion | Make the simulator deliver real signed webhooks to the configured Webhook URL (or add a "send test webhook" button), and document which simulator actions produce webhooks |
+
+### 10. Sandbox WHEP stream sometimes ends after ~10–15 seconds
+
+| Field | Detail |
+|-|-|
+| Task | Capture 1 frame/s for up to 20 s from the Playground Device over WHEP |
+| Steps | aiortc, video-only `recvonly` offer, POST to `/v1/devices/{id}/media/streaming/whep/sessions` (201 + `Location`), read frames, DELETE the session URL |
+| Expected vs actual | Docs say sessions last up to 30 s (battery) / 60 s (wired). In 4 sessions, two delivered ~20 s of video but two stopped sending frames after ~10 s and ~15 s with no error, no connection-state change, and no notice. The docs don't say whether the Playground Device counts as battery or wired, and the first decodable frame took 2.7–5.1 s to arrive |
+| Severity | Medium |
+| Workaround | Capture window starts at the first decoded frame; stop after 3 s without frames, then close and DELETE the session cleanly |
+| Suggestion | Document the sandbox stream length and the device's power type, and signal end-of-stream (e.g. RTCP BYE or a connection-state change) when the server stops sending |
