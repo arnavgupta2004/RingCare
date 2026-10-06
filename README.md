@@ -8,7 +8,7 @@ A Ring doorstep assistant for elderly and low-vision residents. Each Ring event 
 
 - [x] Step 1 — FastAPI backend with the Ring console endpoints, Amazon Vision API client, webhook HMAC verification
 - [x] Step 2 — WHEP live-video frame capture (aiortc, 1 frame/s, up to 20 s)
-- [ ] Step 3 — Object detection + scene description
+- [x] Step 3 — YOLO-World detection + Bedrock scene description (stub fallback when Bedrock is unavailable)
 - [ ] Step 4 — Doorstep state and package lifecycle
 - [ ] Step 5 — Agent + caregiver alerts
 - [ ] Step 6 — Resident and caregiver web views
@@ -51,6 +51,18 @@ Click the matching event (Package / Vehicle / Motion) in the Ring Playground fir
 
 ```bash
 curl -X POST localhost:8000/simulate-event -H 'Content-Type: application/json' -d '{"event_type":"package","wait":true}'
+```
+
+## Scene analysis
+
+Each captured event is analysed into `data/analysis/<event_id>.json`:
+- **YOLO-World** detections (cardboard box / package / parcel, person, car / truck / van) per frame, plus an event summary.
+- A scene description from a vision model on **Amazon Bedrock** (`BEDROCK_MODEL_ID`, default Claude Haiku 4.5), returned as strict JSON with an `accessible_description` for the resident.
+- If Bedrock is unavailable, a detector-only description marked `"source": "stub"`.
+
+```bash
+./scripts/check_bedrock.sh                                        # can this AWS account call Bedrock?
+python scripts/analyze_event.py data/frames/<event_id>            # re-analyse an existing capture
 ```
 
 ## Credits
