@@ -111,8 +111,8 @@ def annotate_live_frame(event: dict) -> dict:
 def run() -> None:
     from playwright.sync_api import sync_playwright
 
-    check_services(live=True)
-    print(f"Sandbox token: {token_minutes_left():.0f} minutes left")
+    check_services(live=False)  # the token is checked (and can be replaced) right before the capture
+    print(f"Sandbox token: {token_minutes_left():.0f} minutes left (you can paste a fresh one after signing in)")
     print("Loading YOLO-World (for drawing the live frame)…")
     from backend.vision.detect import _load_model
     _load_model()
