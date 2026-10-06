@@ -24,7 +24,7 @@ The four criteria are weighted equally (Tech Implementation breaks ties). The fr
   - **Guard rails in the tools:** a capture from a different camera view can never mark a package missing (perceptual-hash view fingerprints, thresholds measured on real captures, `backend/vision/fingerprint.py`, DECISIONS.md D6). Alerts must match the package state.
   - **Fallbacks:** if the model fails or times out, the rules brain finishes the event without duplicate alerts.
 - **Vision:** YOLO-World open-vocabulary detection ("cardboard box", "package", "parcel", "person", "car", "truck", "van"). It found the parcel in 19 of 20 sandbox frames, where a standard COCO model found nothing (DECISIONS.md D1).
-- **Tested:** 261 pytest tests:
+- **Tested:** 262 pytest tests:
   - **Both stores:** the same store and doorstep tests run against SQLite and DynamoDB (moto).
   - **Agent:** the real Strands loop is driven by a scripted fake model (`tests/fakes.py`), and the rules brain is proven equivalent to the reference rules.
   - **Account linking:** tested end to end against a fake Ring OAuth/API server (`tests/fake_ring.py`).
@@ -189,7 +189,7 @@ In `.env`, fill in `RING_CLIENT_ID`, `RING_CLIENT_SECRET` and `RING_HMAC_KEY`. F
 **2. Check Ring access and run the tests**
 ```bash
 python scripts/list_devices.py --include      # should list "Playground Device"
-pytest                                        # 261 tests, no network or AWS needed
+pytest                                        # 262 tests, no network or AWS needed
 ```
 
 **3. Run the backend** (SQLite and local files by default; no AWS needed)
@@ -235,6 +235,15 @@ python scripts/demo_story.py --aws                        # the story on DynamoD
 ```
 `aws_setup.sh` and `aws_iam_setup.sh` need admin credentials; the server itself only ever uses the restricted profile. Caregiver emails start once the SNS subscription email is confirmed.
 
+## Demo video
+
+```bash
+python scripts/record_demo.py          # Playwright drives the web app scene by scene (docs/VIDEO_SCRIPT.md)
+python scripts/make_video.py           # captions/demo.srt, video/demo_silent.mp4, video/demo_tts.mp4 (needs ffmpeg with libass)
+```
+
+By default the recording replays real Ring sandbox captures through the live server and agent, so it's repeatable. `--live` triggers real WHEP captures and prompts you to click the Playground first.
+
 ## Endpoints
 
 | Route | Ring console field | Purpose |
@@ -246,6 +255,7 @@ python scripts/demo_story.py --aws                        # the story on DynamoD
 | `POST /simulate-event` | — | Dev trigger: same payload shape and handler as a webhook |
 | `POST /digest` | — | Agent writes and sends the caregiver's daily digest |
 | `POST /demo/clock` | — | Set or advance simulated time, then run reminders |
+| `POST /demo/replay` | — | Demo trigger: runs a recorded Ring sandbox capture through the agent (marked `source: replay`) |
 | `POST /packages/{id}/picked-up` | — | The resident's "I picked up the package" button |
 | `GET /state` | — | Everything the web app shows |
 | `GET /health` | — | Liveness |
@@ -266,7 +276,7 @@ backend/
   auth.py             demo-user sign-in for account linking
 web/                  React + Vite resident and caregiver views
 scripts/              demo story, AWS setup/IAM/teardown, Bedrock check, tools
-tests/                261 tests, fake Ring server, scripted fake model
+tests/                262 tests, fake Ring server, scripted fake model
 docs/                 architecture, IAM policy, screenshots, product feedback, feature requests
 DECISIONS.md          design decisions with measurements
 FRICTION_LOG.md       developer-experience friction, ordered by severity

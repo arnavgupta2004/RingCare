@@ -3,7 +3,7 @@
 Draft answers to the hackathon's five product-feedback questions, one section per tool, based on what happened while building DoorSight. Reproduction steps are in [FRICTION_LOG.md](../FRICTION_LOG.md) (IDs F1–F12); requests are in [FEATURE_REQUESTS.md](FEATURE_REQUESTS.md).
 
 > **Before submitting:**
-> 1. Answer every **✍️ Your call / Your opinion** spot. Question 5 especially needs your own Yes/No.
+> 1. Review the question-5 answers marked *(draft — Arnav to confirm)* and change any that don't match your view.
 > 2. Trim to the form's length limits.
 
 The five questions, asked per tool:
@@ -65,7 +65,7 @@ Setup and teardown are scripted and idempotent: `scripts/aws_setup.sh`, `scripts
   - **F2:** the private-app account-linking fields are documented only in a short table at the end of the Configure section.
   - **F8:** the HMAC key looks Base64-encoded but must be used as raw text.
 
-**5. Would you build with it again?** ✍️ *Your call: Yes/No.* Points you might use: the APIs themselves were clean and well specified; most of the pain was sandbox limits (no webhooks, linking needs a paid plan).
+**5. Would you build with it again?** *(draft — Arnav to confirm)* **Yes.** The APIs themselves were clean and precisely documented. WHEP, webhook signing and account linking all worked as specified, and the device list worked on the first call. What held us back was the sandbox (no webhooks, account linking blocked without a paid plan), not the API design. With those fixed, building a second Ring app would be much faster.
 
 ---
 
@@ -89,7 +89,7 @@ Setup and teardown are scripted and idempotent: `scripts/aws_setup.sh`, `scripts
 - **Setup:** added to the IDE by hand from the generic MCP configuration.
 - **First answer:** the first real question (nonce validation) returned the exact App Deployment section with Python code. Useful from the first query.
 
-**5. Would you build with it again?** ✍️ *Your call: Yes/No, and why.*
+**5. Would you build with it again?** *(draft — Arnav to confirm)* **Yes.** It was the fastest way to get exact, citable answers about the Ring APIs, and it kept us from guessing endpoints. Better handling of broad questions, and coverage of Playground behaviour, would make it better still.
 
 ---
 
@@ -114,7 +114,7 @@ Setup and teardown are scripted and idempotent: `scripts/aws_setup.sh`, `scripts
 - **Instant:** the device was there and streaming immediately.
 - **Gaps:** what the buttons do and don't do (switch clips, no webhooks) had to be discovered by experiment; it isn't documented.
 
-**5. Would you build with it again?** ✍️ *Your call: Yes/No, and why.*
+**5. Would you build with it again?** *(draft — Arnav to confirm)* **Yes, with caveats.** A real device and live video stream without buying hardware is a big help, and the scene-switching clips made a repeatable demo possible. But without webhooks or account linking we had to simulate the two flows a real integration depends on.
 
 ---
 
@@ -137,7 +137,7 @@ Setup and teardown are scripted and idempotent: `scripts/aws_setup.sh`, `scripts
 **4. Onboarding (zero to hello world)**
 - **Not reached:** the code was written and tested (with a fake client) early in the build, but the first real invocation has never succeeded on this account. Diagnosing the cause (account-wide, all regions, all models) took several CLI checks because the error message was the same everywhere.
 
-**5. Would you build with it again?** ✍️ *Your call: Yes/No, and why.*
+**5. Would you build with it again?** *(draft — Arnav to confirm)* **Yes**, once access works. Converse and Strands made Bedrock straightforward to design for, and the same code runs unchanged when access is granted. But the account-level block with an unhelpful error cost real time, and we never got to see Haiku's live reasoning in this project.
 
 ---
 
@@ -163,7 +163,7 @@ Setup and teardown are scripted and idempotent: `scripts/aws_setup.sh`, `scripts
 - **Fast:** after `pip install strands-agents`, a scripted model driving two tools ran within minutes.
 - **The sticking points:** the `self` naming rule and the dependency clash.
 
-**5. Would you build with it again?** ✍️ *Your call: Yes/No, and why.*
+**5. Would you build with it again?** *(draft — Arnav to confirm)* **Yes.** Method tools, error results returned to the model, and a small `Model` interface made a well-tested agent with real guard rails possible, even without a working model provider. The rough edges (the `self` naming rule, the dependency clash) were quick to work around.
 
 ---
 
@@ -185,7 +185,7 @@ Setup and teardown are scripted and idempotent: `scripts/aws_setup.sh`, `scripts
 **4. Onboarding (zero to hello world)**
 - **Smooth:** `create-table` plus `put_item`/`get_item` worked first time. The consistency question was the only design snag.
 
-**5. Would you build with it again?** ✍️ *Your call: Yes/No, and why.*
+**5. Would you build with it again?** *(draft — Arnav to confirm)* **Yes.** On-demand capacity and moto-based tests made it painless for a small, read-your-writes workload. The consistency model just needs designing for up front.
 
 ---
 
@@ -207,7 +207,7 @@ Setup and teardown are scripted and idempotent: `scripts/aws_setup.sh`, `scripts
 **4. Onboarding (zero to hello world)**
 - **Quick:** bucket creation, upload and presigned download worked in the first session.
 
-**5. Would you build with it again?** ✍️ *Your call: Yes/No, and why.*
+**5. Would you build with it again?** *(draft — Arnav to confirm)* **Yes.** A private bucket with presigned URLs is the simplest secure way to show camera snapshots in a web app.
 
 ---
 
@@ -228,4 +228,4 @@ Setup and teardown are scripted and idempotent: `scripts/aws_setup.sh`, `scripts
 **4. Onboarding (zero to hello world)**
 - **Quick:** topic, subscription and first delivered email took a few minutes, once we knew to confirm the subscription.
 
-**5. Would you build with it again?** ✍️ *Your call: Yes/No, and why.*
+**5. Would you build with it again?** *(draft — Arnav to confirm)* **Yes.** It's the quickest way to add reliable caregiver email; a clearer signal for unconfirmed subscriptions would make it even easier.
