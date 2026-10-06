@@ -1,7 +1,7 @@
-"""Local object detection on captured frames with a small pretrained YOLO model (COCO classes).
+"""Local object detection on captured frames with YOLO-World (open-vocabulary, ultralytics).
 
-COCO has no "package" or "box" class. Package-like objects are approximated with the
-closest COCO classes (suitcase, handbag, backpack); see DECISIONS.md for the limitation.
+Plain COCO YOLO has no box/parcel class and missed the package on the sandbox clip
+entirely (DECISIONS.md D1), so we prompt YOLO-World with our own class names.
 """
 
 from __future__ import annotations
@@ -16,21 +16,21 @@ from backend.config import PROJECT_ROOT
 
 logger = logging.getLogger("vision.detect")
 
-MODEL_NAME = "yolo11n.pt"
+MODEL_NAME = "yolov8s-worldv2.pt"
 MODEL_PATH = PROJECT_ROOT / "data" / "models" / MODEL_NAME
 CONF_THRESHOLD = 0.25
 
-# COCO label -> our group
+# Open-vocabulary prompt classes -> our group
 GROUPS: dict[str, str] = {
+    "cardboard box": "package",
+    "package": "package",
+    "parcel": "package",
     "person": "person",
-    "suitcase": "package",
-    "handbag": "package",
-    "backpack": "package",
     "car": "vehicle",
     "truck": "vehicle",
-    "bus": "vehicle",
-    "motorcycle": "vehicle",
+    "van": "vehicle",
 }
+CLASSES = list(GROUPS)
 GROUP_NAMES = ("person", "package", "vehicle")
 
 _model = None
@@ -41,13 +41,14 @@ def _load_model():
     global _model
     with _model_lock:
         if _model is None:
-            from ultralytics import YOLO
+            from ultralytics import YOLOWorld
             from ultralytics.utils.downloads import attempt_download_asset
 
             MODEL_PATH.parent.mkdir(parents=True, exist_ok=True)
             attempt_download_asset(MODEL_PATH)  # no-op if already present
-            _model = YOLO(str(MODEL_PATH))
-            logger.info("loaded %s", MODEL_PATH.name)
+            _model = YOLOWorld(str(MODEL_PATH))
+            _model.set_classes(CLASSES)
+            logger.info("loaded %s with classes %s", MODEL_PATH.name, CLASSES)
     return _model
 
 
@@ -91,5 +92,5 @@ def detect_frames(frames: list[Path], conf: float = CONF_THRESHOLD) -> dict[str,
         }
         for g in GROUP_NAMES
     }
-    return {"model": MODEL_NAME, "conf_threshold": conf, "frame_count": len(frames),
+    return {"model": MODEL_NAME, "classes": CLASSES, "conf_threshold": conf, "frame_count": len(frames),
             "summary": summary, "frames": per_frame}
