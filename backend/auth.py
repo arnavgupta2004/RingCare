@@ -21,6 +21,9 @@ import os
 import secrets
 import threading
 import time
+from pathlib import Path
+
+from dotenv import dotenv_values
 
 logger = logging.getLogger("auth")
 
@@ -31,6 +34,16 @@ DEFAULT_EMAIL = "demo@doorsight.local"
 MAX_FAILURES, FAILURE_WINDOW_S = 5, 300
 
 _ephemeral_secret = secrets.token_bytes(32)
+_ENV_FILE = Path(__file__).resolve().parent.parent / ".env"
+
+
+def _env(name: str, default: str = "") -> str:
+    """Environment first, else .env re-read on each call, so scripts/set_demo_password.py
+    takes effect without restarting the server."""
+    value = os.getenv(name)
+    if value is None:
+        value = dotenv_values(_ENV_FILE).get(name)
+    return (value or default).strip()
 
 
 def _b64(data: bytes) -> str:
@@ -64,24 +77,24 @@ def verify_password(password: str, stored: str | None) -> bool:
 
 
 def demo_user_email() -> str:
-    return os.getenv("DEMO_USER_EMAIL", DEFAULT_EMAIL).strip().lower()
+    return _env("DEMO_USER_EMAIL", DEFAULT_EMAIL).lower()
 
 
 def sign_in_configured() -> bool:
-    return bool(os.getenv("DEMO_USER_PASSWORD_HASH", "").strip())
+    return bool(_env("DEMO_USER_PASSWORD_HASH"))
 
 
 def check_credentials(email: str, password: str) -> bool:
     """Constant-time-ish check against the single demo user."""
     email_ok = hmac.compare_digest(email.strip().lower().encode(), demo_user_email().encode())
-    password_ok = verify_password(password, os.getenv("DEMO_USER_PASSWORD_HASH", "").strip())
+    password_ok = verify_password(password, _env("DEMO_USER_PASSWORD_HASH"))
     return email_ok and password_ok
 
 
 # --- session cookie -------------------------------------------------------------
 
 def _secret() -> bytes:
-    configured = os.getenv("SESSION_SECRET", "").strip()
+    configured = _env("SESSION_SECRET")
     if configured:
         return configured.encode()
     return _ephemeral_secret  # sessions don't survive a restart without SESSION_SECRET

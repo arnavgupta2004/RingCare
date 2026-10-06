@@ -4,7 +4,7 @@ Writes DEMO_USER_EMAIL and DEMO_USER_PASSWORD_HASH (scrypt) to .env, plus a rand
 SESSION_SECRET if none exists. The password itself is never stored or printed.
 
     python scripts/set_demo_password.py
-Restart the server afterwards.
+The running server picks it up on the next request (no restart needed).
 """
 
 from __future__ import annotations
@@ -43,7 +43,7 @@ def main() -> int:
     if "\nSESSION_SECRET=" not in "\n" + existing:
         values["SESSION_SECRET"] = secrets.token_urlsafe(32)
     set_env(values)
-    print(f"Saved sign-in for {email} to .env (password stored only as a scrypt hash). Restart the server.")
+    print(f"Saved sign-in for {email} to .env (password stored only as a scrypt hash). No restart needed.")
     return 0
 
 
