@@ -8,7 +8,7 @@ import threading
 from dataclasses import fields
 from pathlib import Path
 
-from backend.store.base import EventRecord, Notification, Package, PackageStatus, StateStore
+from backend.store.base import EventRecord, LinkedAccount, Notification, Package, PackageStatus, StateStore
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS events (
@@ -62,6 +62,23 @@ CREATE TABLE IF NOT EXISTS notifications (
     package_id TEXT,
     status TEXT NOT NULL DEFAULT 'queued',
     extra TEXT NOT NULL DEFAULT '{}'
+);
+
+CREATE TABLE IF NOT EXISTS linked_accounts (
+    account_id TEXT PRIMARY KEY,
+    status TEXT NOT NULL,
+    access_token TEXT,
+    refresh_token TEXT,
+    expires_at REAL NOT NULL,
+    created_at REAL NOT NULL,
+    scope TEXT,
+    token_type TEXT,
+    refreshed_at REAL,
+    linked_at REAL,
+    partner_user TEXT,
+    account_identifier TEXT,
+    integration_status TEXT,
+    last_error TEXT
 );
 """
 
@@ -186,7 +203,20 @@ class SQLiteStore(StateStore):
             out.append(Notification(**d))
         return out
 
+    # --- linked accounts ------------------------------------------------------
+
+    def save_account(self, account: LinkedAccount) -> None:
+        self._insert("linked_accounts", account.to_dict(), replace=True)
+
+    def get_account(self, account_id: str) -> LinkedAccount | None:
+        rows = self._select("SELECT * FROM linked_accounts WHERE account_id = ?", (account_id,))
+        return LinkedAccount(**dict(rows[0])) if rows else None
+
+    def list_accounts(self) -> list[LinkedAccount]:
+        return [LinkedAccount(**dict(r)) for r in self._select("SELECT * FROM linked_accounts ORDER BY created_at, rowid")]
+
     def clear(self) -> None:
+        """Demo reset: events, packages and notifications. Linked accounts are kept."""
         with self._lock, self._conn:
             for table in ("events", "packages", "notifications"):
                 self._conn.execute(f"DELETE FROM {table}")

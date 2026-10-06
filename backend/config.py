@@ -27,10 +27,6 @@ class Settings:
     logs_dir: Path = PROJECT_ROOT / "logs"
 
     @property
-    def tokens_file(self) -> Path:
-        return self.data_dir / "tokens.json"
-
-    @property
     def webhook_log_file(self) -> Path:
         return self.logs_dir / "webhooks.jsonl"
 

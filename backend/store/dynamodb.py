@@ -9,6 +9,7 @@ Layout (one partition per entity kind; a home has tens of items a day, far below
     PACKAGE          <arrived_sim_ts>#<id>           package attributes
     NOTIFICATION     <sim_ts>#<insert ns>#<id>       notification attributes
     ID#<kind>#<id>   ID                              {"ref_sk": <sk above>}   (lookup by id)
+    ACCOUNT          <account_id>                    linked Ring account + tokens
 
 Query on pk returns items in sim-time order (sim_ts strings share the home-timezone offset,
 so they sort lexically), matching the SQLite store. Nested values are stored as JSON strings.
@@ -27,10 +28,10 @@ import boto3
 from boto3.dynamodb.conditions import Key
 from botocore.config import Config
 
-from backend.store.base import EventRecord, Notification, Package, PackageStatus, StateStore
+from backend.store.base import EventRecord, LinkedAccount, Notification, Package, PackageStatus, StateStore
 
 DEFAULT_TABLE = "doorsight-state"
-_INT_FIELDS = {"sim_hour", "frame_count"}
+_INT_FIELDS = {"sim_hour", "frame_count"}  # other numbers come back as float
 _JSON_FIELDS = {"arrival_view", "extra", "agent_trace"}
 _KINDS = ("EVENT", "PACKAGE", "NOTIFICATION")
 
@@ -151,7 +152,21 @@ class DynamoDBStore(StateStore):
         notes = [Notification(**_from_item(i, Notification)) for i in self._query("NOTIFICATION")]
         return [n for n in notes if not audience or n.audience == audience]
 
+    # --- linked accounts ------------------------------------------------------
+
+    def save_account(self, account: LinkedAccount) -> None:
+        self.table.put_item(Item={"pk": "ACCOUNT", "sk": account.account_id, **_to_item(account.to_dict())})
+
+    def get_account(self, account_id: str) -> LinkedAccount | None:
+        item = self.table.get_item(Key={"pk": "ACCOUNT", "sk": account_id}, ConsistentRead=True).get("Item")
+        return LinkedAccount(**_from_item(item, LinkedAccount)) if item else None
+
+    def list_accounts(self) -> list[LinkedAccount]:
+        accounts = [LinkedAccount(**_from_item(i, LinkedAccount)) for i in self._query("ACCOUNT")]
+        return sorted(accounts, key=lambda a: a.created_at)
+
     def clear(self) -> None:
+        """Demo reset: events, packages and notifications. Linked accounts are kept."""
         with self.table.batch_writer() as batch:
             for kind in _KINDS:
                 for item in self._query(kind):

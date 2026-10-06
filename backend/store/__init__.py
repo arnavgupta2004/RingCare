@@ -1,7 +1,7 @@
-from backend.store.base import EventRecord, Notification, Package, PackageStatus, StateStore
+from backend.store.base import EventRecord, LinkedAccount, Notification, Package, PackageStatus, StateStore
 from backend.store.sqlite import SQLiteStore
 
-__all__ = ["EventRecord", "Notification", "Package", "PackageStatus", "StateStore", "SQLiteStore",
+__all__ = ["EventRecord", "LinkedAccount", "Notification", "Package", "PackageStatus", "StateStore", "SQLiteStore",
            "get_store", "store_from_env"]
 
 _store: StateStore | None = None

@@ -94,3 +94,19 @@ def test_notification_without_event_id_round_trips(store):
     n.event_id = None
     store.add_notification(n)
     assert store.list_notifications()[0].event_id is None
+
+
+def test_linked_account_round_trip_and_clear_keeps_accounts(store):
+    from backend.store import LinkedAccount
+
+    acc = LinkedAccount(account_id="ava1.ring.account.ABC", status="unclaimed", access_token="at-1",
+                        refresh_token="rt-1", expires_at=1791262000.5, created_at=1791248000.0, scope="ava.v1:read")
+    store.save_account(acc)
+    assert store.get_account("ava1.ring.account.ABC") == acc
+    acc.status, acc.partner_user, acc.linked_at = "linked", "demo@doorsight.local", 1791249000.0
+    store.save_account(acc)
+    assert [a.status for a in store.list_accounts()] == ["linked"]
+    assert "access_token" not in acc.public_dict() and acc.public_dict()["has_tokens"] is True
+    store.clear()
+    assert store.get_account("ava1.ring.account.ABC") is not None  # demo resets keep linked accounts
+    assert store.get_account("nope") is None

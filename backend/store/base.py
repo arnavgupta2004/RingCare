@@ -90,6 +90,41 @@ class Notification:
         return asdict(self)
 
 
+@dataclass
+class LinkedAccount:
+    """A Ring account and its OAuth tokens (one-way account linking).
+
+    status: unclaimed (tokens received at /token, waiting for /link) | linked | needs_relink
+            (refresh failed) | disconnected (tokens wiped by us) | removed (Ring removed the integration)
+    Times are real Unix seconds (token lifetimes are real time, not demo time).
+    """
+
+    account_id: str
+    status: str
+    access_token: str | None
+    refresh_token: str | None
+    expires_at: float  # access token expiry, Unix seconds
+    created_at: float
+    scope: str | None = None
+    token_type: str | None = None
+    refreshed_at: float | None = None
+    linked_at: float | None = None
+    partner_user: str | None = None  # signed-in partner user who claimed the token
+    account_identifier: str | None = None  # masked identifier sent to Ring
+    integration_status: str | None = None  # awaiting | completed (Ring App-Integrations)
+    last_error: str | None = None
+
+    def to_dict(self) -> dict[str, Any]:
+        return asdict(self)
+
+    def public_dict(self) -> dict[str, Any]:
+        """Safe for logs and the UI: no token values."""
+        d = self.to_dict()
+        d.pop("access_token"), d.pop("refresh_token")
+        d["has_tokens"] = bool(self.access_token)
+        return d
+
+
 class StateStore(ABC):
     # events
     @abstractmethod
@@ -125,6 +160,16 @@ class StateStore(ABC):
 
     @abstractmethod
     def list_notifications(self, audience: str | None = None) -> list[Notification]: ...
+
+    # linked Ring accounts (tokens)
+    @abstractmethod
+    def save_account(self, account: LinkedAccount) -> None: ...
+
+    @abstractmethod
+    def get_account(self, account_id: str) -> LinkedAccount | None: ...
+
+    @abstractmethod
+    def list_accounts(self) -> list[LinkedAccount]: ...
 
     @abstractmethod
     def clear(self) -> None:
