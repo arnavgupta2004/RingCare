@@ -6,7 +6,7 @@ Short record of design choices and known limitations.
 
 **History:** started with `yolo11n.pt` (COCO). COCO has no box/parcel class, and on the Ring sandbox package clip it detected **nothing**, even at confidence 0.15. Bag classes (suitcase, handbag, backpack) as a stand-in didn't help.
 
-**Choice:** `yolov8s-worldv2.pt` (ultralytics YOLO-World, ~25 MB) prompted with custom classes, confidence threshold 0.25. Weights download to `data/models/` (gitignored). It needs OpenAI CLIP (`clip` from `ultralytics/CLIP`, pinned in requirements). The CLIP text encoder (~340 MB) downloads to `~/.cache/clip` on first use.
+**Choice:** `yolov8s-worldv2.pt` (ultralytics YOLO-World, ~25 MB) prompted with custom classes, confidence threshold 0.25. Weights download to `data/models/` (gitignored). It needs OpenAI CLIP (`clip` from `ultralytics/CLIP`, pinned in requirements). The CLIP text encoder (~340 MB) downloads to `weights/clip/` (gitignored) on first use.
 
 | Group | Prompt classes |
 |-|-|

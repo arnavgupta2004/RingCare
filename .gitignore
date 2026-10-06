@@ -27,3 +27,6 @@ venv/
 .DS_Store
 .vscode/
 .idea/
+
+# Model weights downloaded by ultralytics (CLIP text encoder, ~340 MB)
+weights/
