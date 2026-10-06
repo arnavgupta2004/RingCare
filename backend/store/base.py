@@ -40,6 +40,8 @@ class EventRecord:
     # What this capture could say about the open package, e.g.
     # "different view — can't verify package" (see doorstep.record_event)
     package_check: str | None = None
+    # Representative frame for the UI, relative to the data dir (e.g. "frames/<event>/frame_010.jpg")
+    snapshot: str | None = None
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)
@@ -119,3 +121,7 @@ class StateStore(ABC):
 
     @abstractmethod
     def list_notifications(self, audience: str | None = None) -> list[Notification]: ...
+
+    @abstractmethod
+    def clear(self) -> None:
+        """Delete all events, packages and notifications (demo resets)."""

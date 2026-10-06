@@ -18,6 +18,7 @@ from typing import Any
 
 from fastapi import BackgroundTasks, FastAPI, HTTPException, Request
 from fastapi.responses import HTMLResponse, JSONResponse
+from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
 from backend.config import get_settings
@@ -55,6 +56,10 @@ async def lifespan(_: FastAPI):
 
 
 app = FastAPI(title="DoorSight", version="0.1.0", lifespan=lifespan)
+
+# Captured frames for the web UI (snapshots). Only the frames directory is exposed.
+(settings.data_dir / "frames").mkdir(parents=True, exist_ok=True)
+app.mount("/media/frames", StaticFiles(directory=settings.data_dir / "frames"), name="frames")
 
 
 def _page(title: str, body: str) -> HTMLResponse:
@@ -247,8 +252,15 @@ async def state() -> dict[str, Any]:
         "clock": doorstep.clock.as_dict(),
         "packages": [p.to_dict() for p in doorstep.store.list_packages()],
         "notifications": [n.to_dict() for n in doorstep.store.list_notifications()],
-        "events": [e.to_dict() for e in doorstep.store.list_events()[-50:]],
+        "events": [_event_json(e) for e in doorstep.store.list_events()[-50:]],
     }
+
+
+def _event_json(e) -> dict[str, Any]:
+    d = e.to_dict()
+    snap = d.get("snapshot")
+    d["snapshot_url"] = f"/media/{snap}" if snap and snap.startswith("frames/") else None
+    return d
 
 
 def _log_webhook(raw: bytes, headers: dict[str, str]) -> Any:

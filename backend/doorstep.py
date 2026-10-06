@@ -147,7 +147,7 @@ def observations(analysis: dict[str, Any] | None) -> dict[str, Any]:
     if not analysis:
         return {"frame_count": 0, "package": False, "vehicle": False, "person": False,
                 "description_source": None, "accessible_description": None, "frame_source": None,
-                "view": None}
+                "view": None, "snapshot": None}
     summary = (analysis.get("detections") or {}).get("summary", {})
     desc = analysis.get("description") or {}
 
@@ -163,7 +163,23 @@ def observations(analysis: dict[str, Any] | None) -> dict[str, Any]:
         "accessible_description": (desc.get("result") or {}).get("accessible_description"),
         "frame_source": analysis.get("frame_source"),
         "view": analysis.get("view_fingerprint") or _fingerprint_from_frames(analysis),
+        "snapshot": _snapshot(analysis),
     }
+
+
+def _snapshot(analysis: dict[str, Any]) -> str | None:
+    """Frame with the most relevant detections (else the middle one), relative to the data dir."""
+    frames_dir = analysis.get("frames_dir")
+    det_frames = (analysis.get("detections") or {}).get("frames") or []
+    if not frames_dir or not det_frames:
+        return None
+    best = max(det_frames, key=lambda f: (sum(f["counts"].values()), -abs(f["index"] - len(det_frames) // 2)))
+    path = Path(frames_dir) / best["frame"]
+    data_dir = PROJECT_ROOT / "data"
+    try:
+        return str((path if path.is_absolute() else PROJECT_ROOT / path).relative_to(data_dir))
+    except ValueError:
+        return None
 
 
 def _fingerprint_from_frames(analysis: dict[str, Any]) -> dict[str, Any] | None:
@@ -256,6 +272,7 @@ class Doorstep:
             accessible_description=obs["accessible_description"],
             unusual_score=unusual.score if unusual else None,
             unusual_explanation=unusual.explanation if unusual else None,
+            snapshot=obs["snapshot"],
         )
         outcome = EventOutcome(event=event, unusual=unusual, notifications=list(reminders))
         obs_source = obs["description_source"] or "rules"

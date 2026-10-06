@@ -50,3 +50,12 @@ def test_picked_up_endpoint(client):
     assert client.post("/packages/pkg-nope/picked-up").status_code == 404
     state = client.get("/state").json()
     assert state["packages"][0]["status"] == "picked_up" and len(state["notifications"]) == 1
+
+
+def test_state_exposes_snapshot_url(client):
+    client.ds.record_event("e1", "package", analysis={
+        "frame_count": 20, "frames_dir": "data/frames/cap1",
+        "detections": {"summary": {"package": {"frame_fraction": 1.0}},
+                       "frames": [{"index": 0, "frame": "frame_000.jpg", "counts": {"package": 1}}]}})
+    [ev] = client.get("/state").json()["events"]
+    assert ev["snapshot_url"] == "/media/frames/cap1/frame_000.jpg"

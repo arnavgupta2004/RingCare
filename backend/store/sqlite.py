@@ -28,7 +28,8 @@ CREATE TABLE IF NOT EXISTS events (
     accessible_description TEXT,
     unusual_score REAL,
     unusual_explanation TEXT,
-    package_check TEXT
+    package_check TEXT,
+    snapshot TEXT
 );
 CREATE INDEX IF NOT EXISTS events_type_hour ON events (event_type, sim_hour);
 
@@ -67,6 +68,7 @@ _BOOL_EVENT_FIELDS = {"package_seen", "vehicle_seen", "person_seen"}
 MIGRATIONS = [
     ("events", "package_check", "TEXT"),
     ("packages", "arrival_view", "TEXT"),
+    ("events", "snapshot", "TEXT"),
 ]
 
 
@@ -175,3 +177,8 @@ class SQLiteStore(StateStore):
             d["extra"] = json.loads(d["extra"])
             out.append(Notification(**d))
         return out
+
+    def clear(self) -> None:
+        with self._lock, self._conn:
+            for table in ("events", "packages", "notifications"):
+                self._conn.execute(f"DELETE FROM {table}")

@@ -296,3 +296,25 @@ def test_current_event_not_counted_in_its_own_baseline(ds):
     first = ds.record_event("n1", "vehicle", analysis=analysis(vehicle=0.9))
     second = ds.record_event("n2", "vehicle", analysis=analysis(vehicle=0.9))
     assert first.unusual.observed_at_hour == 0 and second.unusual.observed_at_hour == 1
+
+
+def test_snapshot_is_frame_with_most_detections_relative_to_data_dir(ds):
+    an = analysis(package=0.95)
+    an["frames_dir"] = "data/frames/sim-package-1"
+    an["detections"]["frames"] = [
+        {"index": i, "frame": f"frame_{i:03d}.jpg", "counts": {"package": int(i == 3), "person": 0, "vehicle": 0}}
+        for i in range(6)
+    ]
+    ev = ds.record_event("e-snap", "package", analysis=an).event
+    assert ev.snapshot == "frames/sim-package-1/frame_003.jpg"
+    assert ds.store.get_event("e-snap").snapshot == ev.snapshot
+
+
+def test_snapshot_absent_without_frames(ds):
+    assert ds.record_event("e-btn", "button_press").event.snapshot is None
+
+
+def test_store_clear(ds):
+    arrive(ds)
+    ds.store.clear()
+    assert ds.store.list_events() == [] and ds.store.list_packages() == [] and ds.store.list_notifications() == []

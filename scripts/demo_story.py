@@ -7,7 +7,9 @@
     3. Resident presses "I picked it up" -> picked_up
     4. Vehicle event at 03:00 next day -> unusual-hour alert to the caregiver
 
-Uses a separate database (data/demo.db, recreated each run) so live state is untouched.
+Uses a separate database (data/demo.db, emptied each run) so live state is untouched.
+Pass --db data/doorsight.db to load the story into the live server's database instead
+(it is emptied first) and see it in the web UI.
 Frames and analyses come from earlier sandbox captures (data/frames, data/analysis);
 missing analyses are computed with the step-3 pipeline (Bedrock, else the stub).
 
@@ -71,10 +73,11 @@ def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--package-capture", type=Path, default=FRAMES / "sim-package-1791250581919")
     parser.add_argument("--vehicle-capture", type=Path, default=FRAMES / "sim-vehicle-1791250656310")
+    parser.add_argument("--db", type=Path, default=DEMO_DB, help="SQLite file to write (emptied first)")
     args = parser.parse_args()
 
-    DEMO_DB.unlink(missing_ok=True)
-    store = SQLiteStore(DEMO_DB)
+    store = SQLiteStore(args.db)
+    store.clear()  # not unlink: a running server may hold the file open
     clock = DemoClock(tz="Asia/Kolkata")
     ds = Doorstep(store, clock, reminder_hours=3)
     today = clock.now().date()
@@ -128,7 +131,7 @@ def main() -> int:
     for n in store.list_notifications():
         print(f"    {n.sim_ts}  {n.audience:<9} {n.kind:<16} source={n.source:<5} event={n.event_id}")
         print(textwrap.indent(textwrap.fill(n.text, 96), "      "))
-    print(f"\n  database: {DEMO_DB}")
+    print(f"\n  database: {args.db}")
     return 0
 
 
