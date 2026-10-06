@@ -74,6 +74,8 @@ def main() -> int:
     parser.add_argument("--package-capture", type=Path, default=FRAMES / "sim-package-1791250581919")
     parser.add_argument("--vehicle-capture", type=Path, default=FRAMES / "sim-vehicle-1791250656310")
     parser.add_argument("--db", type=Path, default=DEMO_DB, help="SQLite file to write (emptied first)")
+    parser.add_argument("--until", choices=["arrival", "reminder", "pickup", "night"], default="night",
+                        help="stop after this step (e.g. 'reminder' leaves the package waiting, for the UI)")
     args = parser.parse_args()
 
     store = SQLiteStore(args.db)
@@ -101,21 +103,34 @@ def main() -> int:
     print(f"  package {package_id} is still: {status}")
     assert status == "present", "a different camera view must not change the package state"
 
+    if args.until == "arrival":
+        return finish(store, clock, args.db)
+
     step("2. Advance demo clock to 3 h after arrival")
     clock.advance((arrived + timedelta(hours=3) - clock.now()).total_seconds())
     print(f"  sim now {fmt_time(clock.now())}")
     for n in ds.check_reminders():
         print(f"  notify  [{n.audience}/{n.kind}] {n.text}")
 
+    if args.until == "reminder":
+        return finish(store, clock, args.db)
+
     step('3. Resident presses "I picked up the package"')
     pkg = ds.mark_picked_up(package_id)
     print(f"  package {pkg.id} -> {pkg.status.value} at sim {pkg.resolved_sim_ts}")
+
+    if args.until == "pickup":
+        return finish(store, clock, args.db)
 
     step("4. Vehicle event (sim 03:00 next day)")
     clock.set(datetime.combine(today + timedelta(days=1), datetime.min.time()).replace(hour=3))
     out = ds.record_event(f"demo-night-{args.vehicle_capture.name}", "vehicle", analysis=veh_analysis, source="demo")
     show_outcome(out)
 
+    return finish(store, clock, args.db)
+
+
+def finish(store: SQLiteStore, clock: DemoClock, db: Path) -> int:
     step("Final state")
     print(f"  demo clock: {clock.as_dict()['sim_now']} (offset {clock.offset_s / 3600:+.2f} h)")
     print("  packages:")
@@ -131,7 +146,7 @@ def main() -> int:
     for n in store.list_notifications():
         print(f"    {n.sim_ts}  {n.audience:<9} {n.kind:<16} source={n.source:<5} event={n.event_id}")
         print(textwrap.indent(textwrap.fill(n.text, 96), "      "))
-    print(f"\n  database: {args.db}")
+    print(f"\n  database: {db}")
     return 0
 
 

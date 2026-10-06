@@ -11,7 +11,7 @@ A Ring doorstep assistant for elderly and low-vision residents. Each Ring event 
 - [x] Step 3 — YOLO-World detection + Bedrock scene description (stub fallback when Bedrock is unavailable)
 - [x] Step 4 — Doorstep state (SQLite), package lifecycle, unusual-hour scoring, demo clock
 - [ ] Step 5 — Agent + caregiver alerts
-- [ ] Step 6 — Resident and caregiver web views
+- [x] Step 6 — Resident and caregiver web views (React + Vite, axe-checked)
 - [ ] Step 7 — Full account linking flow
 - [ ] Step 8 — Docs, architecture diagram, demo
 
@@ -75,6 +75,34 @@ python scripts/demo_story.py
 ```
 
 Runs the story against real sandbox captures in a separate `data/demo.db`: package arrives (sim 2:10 PM) → clock +3 h → reminder → resident pickup → vehicle at sim 03:00 → unusual-hour caregiver alert.
+
+## Web app
+
+```bash
+cd web && npm install && npm run dev      # http://localhost:5180 (proxies the backend on :8000)
+npm run a11y                              # axe-core WCAG 2.2 A/AA check + screenshots in docs/screenshots/
+```
+
+- **`/resident`:** large text, high contrast, screen-reader first.
+  - A feed of door updates and the latest picture; while a package is waiting, the picture of that package.
+  - A large "I picked up the package" button, shown only when a package is waiting.
+  - New updates are announced once through a polite live region.
+  - After a pickup, focus moves to the package section.
+- **`/caregiver`:** an alert feed with snapshot, explanation and unusual-hour score.
+  - Every item has a source label: `bedrock`, `stub` or `rules`.
+  - Packages, messages sent to the resident, and the door activity log.
+  - Demo clock controls and buttons that trigger `/simulate-event`.
+
+Both views poll `GET /state` every 3 s. To load the demo story into the live database for the UI:
+
+```bash
+python scripts/demo_story.py --db data/doorsight.db               # full story
+python scripts/demo_story.py --db data/doorsight.db --until reminder  # package still waiting
+```
+
+| Resident | Caregiver |
+|-|-|
+| ![Resident view](docs/screenshots/resident.png) | ![Caregiver view](docs/screenshots/caregiver.png) |
 
 ## Credits
 
