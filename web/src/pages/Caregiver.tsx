@@ -1,12 +1,13 @@
 import { useEffect, useState } from "react";
-import type { DoorEvent, Notification, Source } from "../api";
-import { api, formatDateTime, newestFirst, useDoorState } from "../api";
+import type { DoorEvent, Notification, Source, TraceEntry } from "../api";
+import { api, formatDateTime, isEstimate, newestFirst, useDoorState } from "../api";
 
 const KIND_LABEL: Record<string, string> = {
   package_arrived: "Package arrived",
   package_reminder: "Package reminder",
   package_missing: "Possible missing package",
   unusual_hour: "Unusual-hour activity",
+  daily_digest: "Daily digest",
 };
 
 const SOURCE_TITLE: Record<Source, string> = {
@@ -25,6 +26,50 @@ function SourceBadge({ source }: { source: Source }) {
 }
 
 const eventSource = (e: DoorEvent): Source => e.description_source ?? "rules";
+
+function EstimateBadge() {
+  return (
+    <span className="badge badge-stub" title="Scene description was an automatic estimate from the local detector">
+      vision: stub
+    </span>
+  );
+}
+
+function traceLine(t: TraceEntry): string {
+  const args = t.input && Object.keys(t.input).length
+    ? `(${Object.entries(t.input).map(([k, v]) => `${k}: ${typeof v === "string" ? `"${v}"` : JSON.stringify(v)}`).join(", ")})`
+    : "()";
+  return `${t.tool}${args}`;
+}
+
+function AgentReasoning({ event, open = false }: { event: DoorEvent; open?: boolean }) {
+  if (!event.agent_brain && !event.agent_reason) return null;
+  const trace = event.agent_trace ?? [];
+  return (
+    <details className="reasoning" open={open}>
+      <summary>
+        <SourceBadge source={(event.agent_brain ?? "rules") as Source} /> Agent reasoning
+        <span className="muted"> · {trace.length} tool call{trace.length === 1 ? "" : "s"}</span>
+      </summary>
+      {event.agent_reason && <p className="reason">{event.agent_reason}</p>}
+      {trace.length > 0 && (
+        <ol className="trace">
+          {trace.map((t, i) => (
+            <li key={i} className={t.ok === false ? "trace-error" : undefined}>
+              <code>{traceLine(t)}</code>
+              {t.ok === false ? (
+                <span className="trace-result"> refused: {t.error}</span>
+              ) : t.output ? (
+                <span className="trace-result"> → {t.output.length > 140 ? t.output.slice(0, 140) + "…" : t.output}</span>
+              ) : null}
+              {t.brain && t.brain !== event.agent_brain && <span className="muted"> [{t.brain}]</span>}
+            </li>
+          ))}
+        </ol>
+      )}
+    </details>
+  );
+}
 
 function Score({ value }: { value: number }) {
   const level = value >= 0.7 ? "high" : value > 0 ? "mid" : "low";
@@ -49,12 +94,14 @@ function AlertCard({ n, event, tz }: { n: Notification; event?: DoorEvent; tz: s
         <div className="alert-head">
           <h3>{KIND_LABEL[n.kind] ?? n.kind}</h3>
           <SourceBadge source={n.source} />
+          {isEstimate(n) && n.source !== "stub" && <EstimateBadge />}
           <time dateTime={n.sim_ts}>{formatDateTime(n.sim_ts, tz)}</time>
         </div>
         <p>{n.text}</p>
         {explanation && <p className="muted">{explanation}</p>}
         {event?.package_check && <p className="muted">Package check: {event.package_check}</p>}
         {event?.unusual_score != null && <Score value={event.unusual_score} />}
+        {event && <AgentReasoning event={event} open />}
       </div>
     </li>
   );
@@ -71,7 +118,8 @@ export default function Caregiver() {
 
   const tz = state?.clock.tz ?? "UTC";
   const events = new Map((state?.events ?? []).map((e) => [e.event_id, e]));
-  const alerts = newestFirst((state?.notifications ?? []).filter((n) => n.audience === "caregiver"));
+  const alerts = newestFirst((state?.notifications ?? []).filter((n) => n.audience === "caregiver" && n.kind !== "daily_digest"));
+  const digest = newestFirst((state?.notifications ?? []).filter((n) => n.kind === "daily_digest"))[0];
   const residentMsgs = newestFirst((state?.notifications ?? []).filter((n) => n.audience === "resident"));
   const activity = newestFirst(state?.events ?? []);
   const packages = [...(state?.packages ?? [])].reverse();
@@ -93,6 +141,12 @@ export default function Caregiver() {
       return `Demo clock now ${formatDateTime(r.sim_now, r.tz)}${reminders}`;
     });
 
+  const sendDigest = () =>
+    run("Writing the daily digest", async () => {
+      const r = await api.digest();
+      return `Daily digest written by ${r.brain} and ${r.notification?.status ?? "queued"}.`;
+    });
+
   const simulate = (type: "package" | "vehicle" | "motion") =>
     run(`Simulating ${type}`, async () => {
       const r = await api.simulate(type);
@@ -105,6 +159,11 @@ export default function Caregiver() {
         <div>
           <h1>DoorSight · Caregiver</h1>
           <p className="muted">Front door of the home you look after</p>
+          {state?.agent && (
+            <p className="agent-line" title={state.agent.why}>
+              Agent brain: <SourceBadge source={state.agent.brain as Source} /> <span className="muted small">{state.agent.why}</span>
+            </p>
+          )}
         </div>
         {state && (
           <div className="c-clock" role="group" aria-label="Demo clock">
@@ -136,6 +195,7 @@ export default function Caregiver() {
             <button type="button" className="sim" onClick={() => simulate("package")}>Simulate package</button>
             <button type="button" className="sim" onClick={() => simulate("vehicle")}>Simulate vehicle</button>
             <button type="button" className="sim" onClick={() => simulate("motion")}>Simulate motion</button>
+            <button type="button" className="ghost" onClick={sendDigest}>Send daily digest</button>
           </div>
           <p className="muted small">Click the matching event in the Ring Playground first so the camera shows that scene.</p>
           <p className="status" role="status" aria-live="polite">{status}</p>
@@ -150,6 +210,23 @@ export default function Caregiver() {
             </ul>
           ) : (
             <p className="muted">No alerts.</p>
+          )}
+        </section>
+
+        <div className="side">
+        <section className="panel digest" aria-labelledby="digest-h">
+          <h2 id="digest-h">Daily digest</h2>
+          {digest ? (
+            <>
+              <div className="alert-head">
+                <SourceBadge source={digest.source} />
+                <span className="muted small">{digest.status === "sent" ? "emailed" : digest.status}</span>
+                <time dateTime={digest.sim_ts}>{formatDateTime(digest.sim_ts, tz)}</time>
+              </div>
+              <pre className="digest-text">{digest.text}</pre>
+            </>
+          ) : (
+            <p className="muted">No digest yet. Use “Send daily digest” in the demo controls.</p>
           )}
         </section>
 
@@ -184,6 +261,8 @@ export default function Caregiver() {
           )}
         </section>
 
+        </div>
+
         <section className="panel activity" aria-labelledby="act-h">
           <h2 id="act-h">Door activity</h2>
           {activity.length ? (
@@ -196,6 +275,7 @@ export default function Caregiver() {
                   <th scope="col">Package check</th>
                   <th scope="col">Unusual</th>
                   <th scope="col">Source</th>
+                  <th scope="col">Agent</th>
                 </tr>
               </thead>
               <tbody>
@@ -210,6 +290,7 @@ export default function Caregiver() {
                     <td>{e.package_check ?? "—"}</td>
                     <td>{e.unusual_score != null ? e.unusual_score.toFixed(2) : "—"}</td>
                     <td><SourceBadge source={eventSource(e)} /></td>
+                    <td className="agent-cell"><AgentReasoning event={e} /></td>
                   </tr>
                 ))}
               </tbody>

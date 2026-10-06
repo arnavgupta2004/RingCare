@@ -27,6 +27,20 @@ export interface DoorEvent {
   unusual_explanation: string | null;
   package_check: string | null;
   snapshot_url: string | null;
+  agent_brain: "bedrock" | "rules" | null;
+  agent_reason: string | null;
+  agent_trace: TraceEntry[] | null;
+}
+
+export interface TraceEntry {
+  tool: string;
+  brain?: string;
+  ok?: boolean;
+  input?: Record<string, unknown>;
+  output?: string;
+  error?: string;
+  sim_ts?: string;
+  ms?: number;
 }
 
 export interface Package {
@@ -49,9 +63,15 @@ export interface Notification {
   source: Source;
   sim_ts: string;
   status: string;
+  extra?: { observation_source?: "bedrock" | "stub" | null; score?: number; [k: string]: unknown };
 }
 
+/** True when the underlying scene description was the detector-only stand-in. */
+export const isEstimate = (n: { source: string; extra?: { observation_source?: string | null } }) =>
+  n.source === "stub" || n.extra?.observation_source === "stub";
+
 export interface State {
+  agent?: { brain: "bedrock" | "rules"; why: string };
   clock: Clock;
   packages: Package[];
   notifications: Notification[];
@@ -77,6 +97,11 @@ export const api = {
   pickedUp: (id: string) => request<Package>(`/packages/${encodeURIComponent(id)}/picked-up`, { method: "POST" }),
   clock: (body: { set?: string; advance_hours?: number; reset?: boolean }) =>
     request<Clock & { reminders_queued: Notification[] }>("/demo/clock", { method: "POST", body: JSON.stringify(body) }),
+  digest: () =>
+    request<{ brain: string; reason: string; notification: Notification | null }>("/digest", {
+      method: "POST",
+      body: JSON.stringify({}),
+    }),
   simulate: (event_type: "package" | "vehicle" | "motion") =>
     request<{ status: string; event_id: string; presenter_hint: string }>("/simulate-event", {
       method: "POST",

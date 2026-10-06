@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { api, formatTime, newestFirst, openPackage, useDoorState } from "../api";
+import { api, formatTime, isEstimate, newestFirst, openPackage, useDoorState } from "../api";
 
 /**
  * Resident view: large text, high contrast, screen-reader first.
@@ -117,7 +117,7 @@ export default function Resident() {
                   <time dateTime={n.sim_ts}>{formatTime(n.sim_ts, tz)}</time>
                   <p>
                     {n.text}
-                    {n.source === "stub" && <span className="r-estimate"> (automatic estimate)</span>}
+                    {isEstimate(n) && <span className="r-estimate"> (automatic estimate)</span>}
                   </p>
                 </li>
               ))}

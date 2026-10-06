@@ -110,3 +110,22 @@ table { width: 100%; border-collapse: collapse; font-size: .9rem; }
 th, td { text-align: left; padding: .45rem .5rem; border-top: 1px solid var(--line); vertical-align: top; }
 th { color: var(--muted); font-weight: 600; border-top: 0; }
 .activity { overflow-x: auto; }
+
+/* agent reasoning + digest */
+.agent-line { margin: .35rem 0 0; display: flex; gap: .4rem; align-items: center; flex-wrap: wrap; }
+.reasoning { margin-top: .5rem; border-left: 3px solid var(--line); padding-left: .6rem; }
+.reasoning summary { cursor: pointer; font-weight: 600; font-size: .9rem; display: list-item; }
+.reasoning .reason { margin: .4rem 0; }
+.trace { margin: .25rem 0 0; padding-left: 1.25rem; font-size: .8rem; }
+.trace li { margin: .15rem 0; overflow-wrap: anywhere; }
+.trace code { font-size: .8rem; background: var(--bg); padding: 0 .25rem; border-radius: 4px; }
+.trace-result { color: var(--muted); }
+.trace-error .trace-result { color: var(--red); }
+.agent-cell { min-width: 260px; max-width: 420px; }
+.agent-cell .reasoning { margin-top: 0; }
+.digest-text { white-space: pre-wrap; font-family: inherit; font-size: .9rem; margin: .5rem 0 0; }
+.side { display: flex; flex-direction: column; gap: 1rem; min-width: 0; }
+.c-header { flex-wrap: nowrap; align-items: flex-start; }
+.c-header > div:first-child { flex: 1 1 auto; min-width: 0; }
+.c-clock { flex: 0 0 auto; }
+@media (max-width: 700px) { .c-header { flex-wrap: wrap; } }
