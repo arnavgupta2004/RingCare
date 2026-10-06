@@ -14,6 +14,7 @@ resident view, and the agent's reasoning. Then run:
 
 from __future__ import annotations
 
+import argparse
 import json
 import os
 import subprocess
@@ -54,7 +55,34 @@ def ffmpeg(*args: str) -> None:
     subprocess.run([FFMPEG, "-hide_banner", "-loglevel", "error", "-y", *args], check=True)
 
 
+def console_from_video(path: Path, spec: str, work: Path) -> Path:
+    """Build the Playground beat from your own screen recording.
+
+    spec: "start-end@w:h:x:y,…" in seconds and source pixels, e.g. the Package click on the
+    "Simulate live view event" card, then the Live Stream dialog. Crop away anything secret.
+    """
+    clips = []
+    for n, part in enumerate(spec.split(",")):
+        span, crop = part.split("@")
+        a, b = (float(x) for x in span.split("-"))
+        out = work / f"console_{n}.mp4"
+        ffmpeg("-ss", f"{a:.3f}", "-t", f"{b - a:.3f}", "-i", str(path), "-vf",
+               f"fps=30,crop={crop},scale=1920:1080:force_original_aspect_ratio=decrease,"
+               f"pad=1920:1080:(ow-iw)/2:(oh-ih)/2:color=0x0b0d12,{BADGE},{CONSOLE_LABEL}", *ENCODE, str(out))
+        clips.append(out)
+    listing = work / "console.txt"
+    listing.write_text("".join(f"file '{c}'\n" for c in clips))
+    out = work / "01_click.mp4"
+    ffmpeg("-f", "concat", "-safe", "0", "-i", str(listing), "-c", "copy", str(out))
+    return out
+
+
 def main() -> int:
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--console-video", type=Path, help="your screen recording of the Ring Playground")
+    parser.add_argument("--console-clips", default="3.4-4.7@2240:1260:560:560,9.0-14.0@2450:1060:240:520",
+                        help="segments of --console-video as start-end@w:h:x:y, comma-separated")
+    args = parser.parse_args()
     full = json.loads((ROOT / "video" / "timeline.json").read_text())["scene_offsets_s"]
     live = json.loads((ROOT / "video" / "live_timeline.json").read_text())
     marks = live["marks_s"]
@@ -81,6 +109,12 @@ def main() -> int:
     cut_s = (marks["done"] - 1.5) - (marks["trigger"] + 4.0)
     pkg_len = 0.0
     for n, (name, marker, a, b) in enumerate(BEATS, start=1):
+        if name == "click" and args.console_video:
+            out = console_from_video(args.console_video, args.console_clips, work)
+            parts.append(out)
+            pkg_len += duration(out)
+            print(f"live beat {name:9s} {duration(out):5.1f}s (from {args.console_video.name})")
+            continue
         role = "console" if name == "click" else "doorsight"
         src, offset = ROOT / "video" / "raw" / files[role]["file"], files[role]["start_s"]
         start = max(0.0, marks[marker] + a - offset)

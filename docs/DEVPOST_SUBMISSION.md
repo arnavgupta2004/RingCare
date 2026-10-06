@@ -145,4 +145,4 @@ https://github.com/arnavgupta2004/RingCare/blob/main/FRICTION_LOG.md: 12 entries
 > - "Thief stealing our package" by YouTube user frollard, CC BY 4.0, clipped from original. **[YOU]** add the link (shown in the Ring Playground)
 > - **[YOU]** Parking-lot vehicle clip: title, author, link
 >
-> Demo footage replays real Ring sandbox captures through the live DoorSight server; the agent runs on its rules brain while Bedrock access is pending.
+> The package scene is live: the Ring Playground, then a real WHEP capture and detection on fresh frames (the capture wait is shortened on screen). The other scenes replay earlier real Ring sandbox captures through the live DoorSight server. The agent runs on its rules brain while Bedrock access is pending.

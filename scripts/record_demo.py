@@ -274,13 +274,15 @@ def run(live: bool) -> None:
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("--live", action="store_true", help="trigger live WHEP captures (needs a fresh sandbox token)")
+    parser.add_argument("--no-console", action="store_true",
+                        help="with --scene package: skip the Ring console (use your own screen recording instead)")
     parser.add_argument("--scene", choices=["package"], help="record only this scene (with --live: Ring Playground "
                         "click + live capture, for scripts/splice_live_scene.py)")
     args = parser.parse_args()
     if args.scene == "package" and args.live:
         from scripts.record_live_scene import run as run_live_package
 
-        run_live_package()
+        run_live_package(console=not args.no_console)
     elif args.scene:
         sys.exit("--scene package needs --live")
     else:

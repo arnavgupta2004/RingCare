@@ -108,7 +108,9 @@ def annotate_live_frame(event: dict) -> dict:
     return {"frame": str(frame.relative_to(ROOT)), "detections": boxes, "package_confidence": best}
 
 
-def run() -> None:
+def run(console: bool = True) -> None:
+    """console=False: skip the Ring console (the Playground beat comes from your own screen
+    recording, see splice_live_scene.py --console-video); record only the live DoorSight part."""
     from playwright.sync_api import sync_playwright
 
     check_services(live=False)  # the token is checked (and can be replaced) right before the capture
@@ -126,10 +128,15 @@ def run() -> None:
     pages: list[dict] = []  # every tab gets its own recording; remember when each started
 
     with sync_playwright() as pw:
-        context = pw.chromium.launch_persistent_context(
-            str(PROFILE_DIR), channel="chrome", headless=False,
-            viewport={"width": 1920, "height": 1080}, screen={"width": 1920, "height": 1080},
-            record_video_dir=str(RAW_DIR), record_video_size={"width": 1920, "height": 1080})
+        if console:
+            context = pw.chromium.launch_persistent_context(
+                str(PROFILE_DIR), channel="chrome", headless=False,
+                viewport={"width": 1920, "height": 1080}, screen={"width": 1920, "height": 1080},
+                record_video_dir=str(RAW_DIR), record_video_size={"width": 1920, "height": 1080})
+        else:
+            browser = pw.chromium.launch(channel="chrome")
+            context = browser.new_context(viewport={"width": 1920, "height": 1080},
+                                          record_video_dir=str(RAW_DIR), record_video_size={"width": 1920, "height": 1080})
         context.add_init_script(INIT_SCRIPT)
         context.on("page", lambda p: pages.append({"page": p, "start": round(time.monotonic() - t_ref, 3)}))
         for p in context.pages:
@@ -140,12 +147,17 @@ def run() -> None:
             marks[name] = round(time.monotonic() - t_ref, 3)  # seconds since the browser started
             print(f"  [{marks[name]:7.1f}s] {name}")
 
-        page.goto(RING_CONSOLE)
-        input("\n>>> In the Chrome window: sign in to the Ring developer console (if asked) and open the\n"
-              "    Playground. Then press Enter here… ")
-        mark("playground_ready")
-        console = next((p["page"] for p in pages if "amazon" in (p["page"].url or "")), page)
-        refresh_token_prompt()
+        def find_console_page():
+            return next((p["page"] for p in pages if "amazon" in (p["page"].url or "")), page)
+
+        if console:
+            page.goto(RING_CONSOLE)
+            input("\n>>> In the Chrome window: sign in to the Ring developer console (if asked) and open the\n"
+                  "    Playground. Then press Enter here… ")
+            mark("playground_ready")
+            refresh_token_prompt()
+        elif token_minutes_left() < 3:
+            raise SystemExit("The sandbox token expires in under 3 minutes; update RING_ACCESS_TOKEN first.")
 
         # Fresh state and clock, as in the full take (package arrives at 2:10 PM).
         from backend.store import store_from_env
@@ -153,10 +165,13 @@ def run() -> None:
         post("/demo/clock", {"set": datetime.now().replace(hour=14, minute=9, second=55).strftime("%Y-%m-%dT%H:%M:%S")})
         before = {e["event_id"] for e in get_state()["events"]}
 
-        input("\n>>> Now CLICK 'Package' in the Playground. As soon as you've clicked, press Enter here… ")
-        mark("playground_clicked")
-        console = next((p["page"] for p in pages if "amazon" in (p["page"].url or "")), console)
-        time.sleep(6)  # let the clip switch on screen (and avoid the first-capture stall)
+        if console:
+            input("\n>>> Now CLICK 'Package' in the Playground. As soon as you've clicked, press Enter here… ")
+            mark("playground_clicked")
+            console_page = find_console_page()
+            time.sleep(6)  # let the clip switch on screen (and avoid the first-capture stall)
+        else:
+            console_page = page
 
         page.goto(f"{WEB}/caregiver", wait_until="domcontentloaded")
         page.wait_for_selector("text=Demo controls")
@@ -205,8 +220,9 @@ def run() -> None:
         mark("end")
 
         starts = {id(p["page"]): p["start"] for p in pages}
-        sources = {"doorsight": (page, RAW_DIR / "live_package.webm"),
-                   "console": (console, RAW_DIR / "live_console.webm")}
+        sources = {"doorsight": (page, RAW_DIR / "live_package.webm")}
+        if console:
+            sources["console"] = (console_page, RAW_DIR / "live_console.webm")
         videos = {role: (p.video, starts.get(id(p), 0.0), target) for role, (p, target) in sources.items()}
         context.close()
         files = {}
@@ -229,4 +245,4 @@ def run() -> None:
 
 
 if __name__ == "__main__":
-    run()
+    run(console="--no-console" not in sys.argv)

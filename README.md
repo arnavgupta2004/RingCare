@@ -244,6 +244,14 @@ python scripts/make_video.py           # captions/demo.srt, video/demo_silent.mp
 
 By default the recording replays real Ring sandbox captures through the live server and agent, so it's repeatable. `--live` triggers real WHEP captures and prompts you to click the Playground first.
 
+The submitted video's package scene is live: a screen recording of the Ring Playground plus a real WHEP capture, spliced in place of the replayed scene.
+
+```bash
+python scripts/record_demo.py --live --scene package --no-console      # live capture + DoorSight views
+python scripts/splice_live_scene.py --console-video "<your Playground screen recording>.mov"
+python scripts/make_video.py --raw video/raw/demo_composite.mp4 --timeline video/timeline_composite.json
+```
+
 ## Endpoints
 
 | Route | Ring console field | Purpose |

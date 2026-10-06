@@ -19,6 +19,13 @@ Target 2:50, safely under the 3:00 limit.
 
 ## Notes for recording
 
+- **Final cut:** the package scene (0:29–1:05) is **live**:
+  1. Your screen recording of the Ring Playground (cropped to the Package button and the Live Stream dialog, so the token on the page never shows).
+  2. A real WHEP capture through DoorSight (`record_demo.py --live --scene package --no-console`).
+  3. YOLO-World on the fresh frames, the resident view, and the agent's reasoning.
+
+  It carries a "LIVE from Ring sandbox" badge and an on-screen note saying how many seconds of capture wait were cut. `scripts/splice_live_scene.py` puts it in place of the replayed scene; build the final files with `make_video.py --raw video/raw/demo_composite.mp4 --timeline video/timeline_composite.json`. The other scenes replay recorded sandbox captures.
+
 - **Automated draft:** `scripts/record_demo.py` replays the real Ring sandbox captures already on disk (frames recorded earlier from the Playground's WHEP stream) through the live server and agent. It is repeatable, and the Ring console doesn't need to be open.
 - **Live version (`--live`):** triggers real WHEP captures through `/simulate-event`. Click the matching Playground button a few seconds before each trigger; the script pauses and prompts you. Needs a fresh sandbox token.
 - **Email footage:** the 3 AM scene shows "emailed" on the alert. If you film the SNS email arriving on your phone, cut it in at about 1:40 (the alert appears around 1:37).
