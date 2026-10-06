@@ -10,12 +10,12 @@ import time
 import uuid
 from dataclasses import asdict, dataclass
 from datetime import datetime, timezone
+from pathlib import Path
 from typing import Any
 
+from backend.agent.runner import get_runner
 from backend.config import current_access_token, get_settings
 from backend.ring.client import RingClient
-from backend.doorstep import get_doorstep
-from backend.vision.analyze import analyze_event
 from backend.vision.capture import capture_with_retry
 
 logger = logging.getLogger("events")
@@ -104,51 +104,42 @@ def _safe_dirname(event_id: str) -> str:
     return re.sub(r"[^A-Za-z0-9._-]", "_", event_id)[:120]
 
 
+async def capture_for_event(event_id: str, device_id: str | None) -> Path | None:
+    """Live WHEP capture for an event (one session at a time). Returns the frames directory."""
+    settings = get_settings()
+    token = current_access_token()
+    device_id = device_id or await default_device_id(token)
+    out_dir = settings.data_dir / "frames" / _safe_dirname(event_id)
+    async with _capture_lock:
+        result = await capture_with_retry(token, device_id, out_dir)
+    if result.error:
+        logger.warning("event %s: capture error: %s", event_id, result.error)
+    return out_dir if result.frames else None
+
+
 async def handle_event(event: DoorEvent) -> dict[str, Any]:
-    """Single entry point for every door event: record it, then capture frames if relevant."""
+    """Single entry point for every door event (webhook or simulated): the agent handles it."""
     settings = get_settings()
     record: dict[str, Any] = {"event": {k: v for k, v in asdict(event).items() if k != "raw"}}
-    analysis: dict[str, Any] | None = None
-    device_id = event.device_id
-
-    if event.event_type in CAPTURE_EVENT_TYPES:
-        token = current_access_token()
-        try:
-            device_id = event.device_id or await default_device_id(token)
-            out_dir = settings.data_dir / "frames" / _safe_dirname(event.event_id)
-            async with _capture_lock:
-                result = await capture_with_retry(token, device_id, out_dir)
-            record["capture"] = result.as_dict()
-            if result.frames:
-                analysis = await asyncio.to_thread(
-                    analyze_event, event.event_id, event.event_type, out_dir, "ring_whep"
-                )
-                desc = analysis.get("description") or {}
-                record["analysis"] = {"source": desc.get("source"), **(desc.get("result") or {})}
-        except Exception as exc:
-            logger.error("event %s: capture failed: %s", event.event_id, exc)
-            record["capture"] = {"error": str(exc), "frame_count": 0}
-    else:
-        record["capture"] = None
-
     try:
-        outcome = await asyncio.to_thread(
-            get_doorstep().record_event, event.event_id, event.event_type,
-            analysis=analysis, device_id=device_id, source=event.source,
-        )
-        record["doorstep"] = {
-            "sim_ts": outcome.event.sim_ts,
-            "package_action": outcome.package_action,
-            "unusual_score": outcome.event.unusual_score,
-            "notifications": [{"audience": n.audience, "kind": n.kind, "text": n.text} for n in outcome.notifications],
+        ctx = await get_runner().handle_event(
+            event.event_id, event.event_type, device_id=event.device_id, source=event.source)
+        record["agent"] = {
+            "brain": ctx.brain,
+            "reason": ctx.reason,
+            "tools": [t["tool"] + ("" if t.get("ok") else " (error)") for t in ctx.trace],
+            "package_action": ctx.package_action,
+            "unusual_score": ctx.unusual.score if ctx.unusual else None,
+            "notifications": [{"audience": n.audience, "kind": n.kind, "text": n.text} for n in ctx.notifications],
+            "description_source": (ctx.obs or {}).get("description_source"),
         }
     except Exception as exc:
-        logger.error("event %s: doorstep update failed: %s", event.event_id, exc)
-        record["doorstep"] = {"error": str(exc)}
+        logger.exception("event %s: agent failed", event.event_id)
+        record["agent"] = {"error": str(exc)}
 
     record["handled_at"] = datetime.now(timezone.utc).isoformat()
     with (settings.logs_dir / "events.jsonl").open("a") as f:
-        f.write(json.dumps(record) + "\n")
-    logger.info("event %s (%s) handled: %s frames", event.event_id, event.event_type,
-                (record["capture"] or {}).get("frame_count", "-"))
+        f.write(json.dumps(record, default=str) + "\n")
+    logger.info("event %s (%s) handled by %s", event.event_id, event.event_type,
+                (record["agent"] or {}).get("brain", "error"))
     return record

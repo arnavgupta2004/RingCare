@@ -21,6 +21,7 @@ from fastapi.responses import HTMLResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
+from backend.agent.runner import get_runner, select_brain_at_startup
 from backend.config import get_settings
 from backend.doorstep import PackageStateError, get_doorstep
 from backend.events import SIMULATABLE, build_simulated_payload, handle_event, normalize
@@ -51,8 +52,12 @@ async def _reminder_loop() -> None:
 @asynccontextmanager
 async def lifespan(_: FastAPI):
     task = asyncio.create_task(_reminder_loop())
+    # Choose the agent brain (runs scripts/check_bedrock.sh when AGENT_BRAIN=auto) without
+    # delaying startup; events use the rules brain until the choice is made.
+    brain_task = asyncio.create_task(asyncio.to_thread(select_brain_at_startup))
     yield
     task.cancel()
+    brain_task.cancel()
 
 
 app = FastAPI(title="DoorSight", version="0.1.0", lifespan=lifespan)
@@ -245,6 +250,19 @@ async def package_picked_up(package_id: str) -> dict[str, Any]:
     return pkg.to_dict()
 
 
+class DigestRequest(BaseModel):
+    day: str | None = None  # "YYYY-MM-DD" home-local; default = the 24 hours ending now (sim)
+
+
+@app.post("/digest")
+async def digest(body: DigestRequest | None = None) -> dict[str, Any]:
+    """Ask the agent to write and send the caregiver's daily digest."""
+    ctx = await get_runner().write_digest((body.day if body else None) or None)
+    note = next((n for n in ctx.notifications if n.kind == "daily_digest"), None)
+    return {"brain": ctx.brain, "reason": ctx.reason, "notification": note.to_dict() if note else None,
+            "trace": ctx.trace}
+
+
 @app.get("/state")
 async def state() -> dict[str, Any]:
     doorstep = get_doorstep()
@@ -256,6 +274,7 @@ async def state() -> dict[str, Any]:
                    for e in doorstep.store.list_events()[-50:]],
         "backends": {"state": type(doorstep.store).__name__, "snapshots": doorstep.snapshots.name,
                      "notifier": doorstep.notifier.name},
+        "agent": get_runner().info(),
     }
 
 
