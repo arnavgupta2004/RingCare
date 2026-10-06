@@ -1,0 +1,16 @@
+* { box-sizing: border-box; }
+html, body { margin: 0; height: 100%; font-family: system-ui, -apple-system, "Segoe UI", sans-serif; }
+body { background: #0b0d12; color: #fff; display: flex; align-items: center; justify-content: center; }
+.card { max-width: 1000px; padding: 0 48px; }
+h1 { font-size: 64px; margin: 0 0 12px; letter-spacing: -0.5px; }
+.kicker { color: #ffe14d; font-weight: 800; font-size: 22px; letter-spacing: 2px; text-transform: uppercase; margin-bottom: 18px; }
+p { font-size: 28px; line-height: 1.45; color: #e6e8ee; margin: 12px 0; }
+.q { color: #ffe14d; font-weight: 700; }
+.small { font-size: 20px; color: #aab0bd; }
+.frame { background: #fff; color: #111; width: 100%; height: 100%; display: flex; flex-direction: column; align-items: center; justify-content: center; }
+.frame img { max-width: 94%; max-height: 82%; border-radius: 10px; box-shadow: 0 6px 30px rgba(0,0,0,.25); }
+.frame .label { font-size: 22px; margin-top: 14px; color: #333; }
+.split { display: flex; gap: 16px; width: 100%; height: 100%; padding: 16px; background: #1a1d24; }
+.split .pane { flex: 1; border-radius: 10px; overflow: hidden; background: #fff; position: relative; }
+.split iframe { border: 0; width: 200%; height: 200%; transform: scale(0.5); transform-origin: 0 0; }
+.split .tag { position: absolute; bottom: 12px; left: 12px; z-index: 2; background: #ffe14d; color: #000; font-weight: 800; padding: 4px 10px; border-radius: 6px; font-size: 16px; }

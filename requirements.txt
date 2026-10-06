@@ -12,3 +12,4 @@ boto3==1.43.108
 botocore[crt]==1.43.108
 moto[dynamodb,s3,sns]==5.2.3
 strands-agents==1.58.0
+playwright==1.63.0

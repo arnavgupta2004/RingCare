@@ -1,0 +1,131 @@
+1
+00:00:00,400 --> 00:00:03,051
+For an older or low-vision person living alone,
+
+2
+00:00:03,051 --> 00:00:05,039
+a video doorbell isn't much help:
+
+3
+00:00:05,039 --> 00:00:07,690
+it shows a picture they can't easily see.
+
+4
+00:00:07,690 --> 00:00:09,015
+Did a parcel arrive?
+
+5
+00:00:09,015 --> 00:00:10,341
+Is it still outside?
+
+6
+00:00:10,341 --> 00:00:12,660
+Who's in the driveway at 3 AM?
+
+7
+00:00:12,660 --> 00:00:13,986
+DoorSight answers those questions.
+
+8
+00:00:15,405 --> 00:00:17,554
+DoorSight is a Ring-powered doorstep assistant.
+
+9
+00:00:17,554 --> 00:00:21,136
+It watches Ring live video, understands what's at the door,
+
+10
+00:00:21,136 --> 00:00:25,433
+and sends calm, accessible updates to the resident and alerts to a
+
+11
+00:00:25,433 --> 00:00:25,792
+caregiver.
+
+12
+00:00:29,400 --> 00:00:32,136
+Frames come from Ring's live WebRTC stream.
+
+13
+00:00:32,136 --> 00:00:34,482
+Open-vocabulary detection finds the parcel locally,
+
+14
+00:00:34,482 --> 00:00:38,391
+and a Strands agent decides who to tell and why.
+
+15
+00:00:38,391 --> 00:00:39,955
+Every step is recorded.
+
+16
+00:01:04,405 --> 00:01:05,629
+One big button.
+
+17
+00:01:05,629 --> 00:01:08,076
+No menus, nothing to read closely.
+
+18
+00:01:24,405 --> 00:01:27,432
+A car at 3 AM is unusual for this home,
+
+19
+00:01:27,432 --> 00:01:29,247
+based on its own visit pattern,
+
+20
+00:01:29,247 --> 00:01:31,971
+so the caregiver gets an alert that explains why.
+
+21
+00:01:49,402 --> 00:01:53,269
+A naive system would say the parcel was stolen just because a
+
+22
+00:01:53,269 --> 00:01:54,880
+different camera saw no box.
+
+23
+00:01:54,880 --> 00:01:58,747
+DoorSight fingerprints the camera view and refuses to raise a false alarm.
+
+24
+00:01:58,747 --> 00:02:01,647
+Its safety rules are enforced in the agent's tools,
+
+25
+00:02:01,647 --> 00:02:02,936
+not just its prompt.
+
+26
+00:02:15,405 --> 00:02:18,495
+Ring WHEP video and webhooks, YOLO-World locally,
+
+27
+00:02:18,495 --> 00:02:22,467
+a Strands agent on Amazon Bedrock, DynamoDB for state,
+
+28
+00:02:22,467 --> 00:02:26,881
+a private S3 bucket for snapshots, SNS for caregiver email,
+
+29
+00:02:26,881 --> 00:02:31,736
+all under a least-privilege IAM user, with more than 260 tests.
+
+30
+00:02:36,405 --> 00:02:38,957
+Ring's sandbox has one doorbell and no webhooks,
+
+31
+00:02:38,957 --> 00:02:42,784
+so we built around what's real and logged twelve friction entries for
+
+32
+00:02:42,784 --> 00:02:43,741
+the Ring team.
+
+33
+00:02:43,741 --> 00:02:46,931
+DoorSight helps people stay independent at their own front door.

@@ -30,3 +30,8 @@ venv/
 
 # Model weights downloaded by ultralytics (CLIP text encoder, ~340 MB)
 weights/
+
+# Demo video outputs (large; uploaded to YouTube)
+video/raw/
+video/*.mp4
+video/timeline.json
