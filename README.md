@@ -2,7 +2,7 @@
 
 **A Ring doorstep assistant for older and low-vision residents, and the family member who looks out for them.** Every Ring event (package, vehicle, motion) goes to an agent that opens the doorbell's live video, works out what is actually at the door, and remembers what happened before. A resident gets calm, large-text, screen-reader-friendly updates and a big "I picked up the package" button. A remote caregiver gets short, evidence-based alerts by email when something needs attention: a package that disappeared without being collected, or a car at the door at 3 AM. Every alert says *why*: the score, the camera-view check, the agent's tool calls. Every message says where its information came from, and the system never claims more certainty than its evidence supports.
 
-> Built for the Amazon Developer Hackathon (Ring track + AWS Builder challenge). Demo video: _(link to add)_
+> Built for the Amazon Developer Hackathon (Ring track + AWS Builder challenge). Demo video: [https://youtu.be/SCt6MBS1vvI](https://youtu.be/SCt6MBS1vvI)
 
 | Resident view | Caregiver view |
 |-|-|
@@ -236,6 +236,10 @@ python scripts/demo_story.py --aws                        # the story on DynamoD
 `aws_setup.sh` and `aws_iam_setup.sh` need admin credentials; the server itself only ever uses the restricted profile. Caregiver emails start once the SNS subscription email is confirmed.
 
 ## Demo video
+
+**Watch:** [https://youtu.be/SCt6MBS1vvI](https://youtu.be/SCt6MBS1vvI)
+
+To rebuild it:
 
 ```bash
 python scripts/record_demo.py          # Playwright drives the web app scene by scene (docs/VIDEO_SCRIPT.md)

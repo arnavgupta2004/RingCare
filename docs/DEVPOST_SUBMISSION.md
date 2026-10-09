@@ -165,12 +165,12 @@ A Ring doorstep assistant for older and low-vision residents: it watches live vi
 
 ## Video
 
-**[YOU]** YouTube URL, public, in English. Upload `video/demo_tts.mp4` (placeholder voice) or your re-voiced version. Put the CC BY clip credits (below) in the video description.
+https://youtu.be/SCt6MBS1vvI
 
 ## Try it out
 
 - Code: https://github.com/arnavgupta2004/RingCare
-- Demo video: **[YOU]** YouTube link
+- Demo video: https://youtu.be/SCt6MBS1vvI
 
 ## Track and challenges
 
