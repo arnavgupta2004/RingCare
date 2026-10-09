@@ -8,15 +8,12 @@ Everything for the Devpost form, field by field. Items marked **[YOU]** still ne
 
 ### Which AI tools have you leveraged while working on this project?
 
-**Building it:**
-- **Claude Code (Anthropic):** an AI coding assistant, used throughout. It wrote and refactored most of the code, tests, scripts and docs from my step-by-step specs, ran the tests, and debugged against the live Ring sandbox and AWS. I set the scope and order of each step, reviewed the results, made the product and design calls, and did the hands-on parts (console setup, live clicks, credentials).
-- **Ring Appstore MCP server:** connected to the coding assistant, so every Ring endpoint detail came from Ring's docs rather than guesswork.
+**[YOU]** Answer this accurately in the form.
 
-**Inside the product:**
-- **YOLO-World:** open-vocabulary object detection (ultralytics), run locally on doorbell frames.
-- **Claude Haiku 4.5 on Amazon Bedrock:** scene descriptions and the agent brain, through the Strands Agents SDK. The code is complete; it's not live yet because my AWS account can't invoke Bedrock models.
-
-**Video:** the placeholder voiceover uses the macOS built-in `say` voice.
+**AI inside the product:**
+- **YOLO-World:** open-vocabulary detection, run locally.
+- **Claude Haiku 4.5 on Amazon Bedrock:** through the Strands Agents SDK; code complete, pending account access.
+- **Ring Appstore MCP docs server:** used during development.
 
 ### Q1. Which developer tools, APIs and SDKs did you use and for what?
 
