@@ -87,7 +87,7 @@ Leave blank: there's no hosted deployment. Judges run it from the repo (README â
 
 ### Are you submitting for the Open Source Mini Challenge?
 
-**Yes**, as a new open-source project created during the hackathon window (MIT license). **[YOU]** This needs the repo to be **public** first.
+**Yes**, as a new open-source project created during the hackathon window (MIT license). The repo is public.
 
 - **Contribution URL:** https://github.com/arnavgupta2004/RingCare
 - **Project repository URL:** https://github.com/arnavgupta2004/RingCare
@@ -135,7 +135,7 @@ Paste "AWS Builder: AWS services used and how" below.
 
 https://github.com/arnavgupta2004/RingCare
 
-**[YOU]** The repo is currently **private**. Either make it **public** (the MIT `LICENSE` then shows in the About section), or keep it private and share it with **testing@devpost.com** and **@AmazonAppDev**.
+The repo is **public** with the MIT `LICENSE` (detected by GitHub), so no collaborator invites are needed.
 
 ### New or existing prior to August 31, 2026?
 
