@@ -85,9 +85,35 @@ See "Friction log" below (link plus a 12-entry summary).
 
 Leave blank: there's no hosted deployment. Judges run it from the repo (README → "Run it").
 
-### Open Source Mini Challenge (Contribution URL, Repository URL, GitHub username, description)
+### Are you submitting for the Open Source Mini Challenge?
 
-**Leave blank: not entering.** That challenge needs a contribution to an existing open-source project, and DoorSight is a new project.
+**Yes**, as a new open-source project created during the hackathon window (MIT license). **[YOU]** This needs the repo to be **public** first.
+
+- **Contribution URL:** https://github.com/arnavgupta2004/RingCare
+- **Project repository URL:** https://github.com/arnavgupta2004/RingCare
+- **GitHub username:** arnavgupta2004
+- **Description:** see "Open Source Mini Challenge description" below.
+
+#### Open Source Mini Challenge description
+
+**What I did.** DoorSight is a new open-source project, MIT-licensed, built from scratch during the hackathon window (first commit 6 October 2026). It's a complete, working reference integration for the Ring Appstore APIs in Python, plus a doorstep assistant for older and low-vision residents built on top of it.
+
+**How it works.**
+- **Ring integration** (backend/ring/), with nothing guessed: every endpoint detail came from Ring's docs:
+  - HMAC webhook verification over the raw body.
+  - WHEP live-video capture with aiortc (video-only, retry on stalled streams, sessions always closed).
+  - One-way account linking: sign-in on the Account Link URL, constant-time nonce matching, App-Integrations POST + PATCH, refresh tokens that rotate, and a log of which token each API call used.
+- **The doorstep assistant:** a Strands agent with eight tools turns each Ring event into decisions: package arrived, reminder, possible missing package, unusual-hour visitor.
+  - **Guard rails in code:** they live in the tools, e.g. camera-view fingerprints stop false "missing package" alarms from a different camera.
+  - **Detection:** YOLO-World finds parcels locally.
+  - **AWS:** DynamoDB, S3 and SNS store state, snapshots and caregiver email under a least-privilege IAM user.
+  - **Web views:** React views for the resident (screen-reader-first, 0 axe violations) and the caregiver.
+- **Reusable test tooling:** 262 tests, including a fake Ring OAuth/API server (tests/fake_ring.py) and a scripted Strands model (tests/fakes.py). Other Ring developers can test their linking flow and agent loop without a paid Ring plan or a live model.
+
+**Why it matters.**
+- **Ring has no official partner SDK,** and the sandbox can't send webhooks or complete account linking. DoorSight gives other developers working, tested code for those hard parts, plus a fake Ring server to test against.
+- **A non-security use of Ring:** helping people stay independent at their own front door.
+- **Documented friction:** a 12-entry friction log and five feature requests, to help Ring improve the developer experience.
 
 ### Are you submitting for the AWS Builder Mini Challenge?
 
