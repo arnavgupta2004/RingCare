@@ -4,6 +4,132 @@ Everything for the Devpost form, field by field. Items marked **[YOU]** still ne
 
 ---
 
+## Form answers, in the order Devpost asks
+
+### Which AI tools have you leveraged while working on this project?
+
+**Building it:**
+- **Claude Code (Anthropic):** an AI coding assistant, used throughout. It wrote and refactored most of the code, tests, scripts and docs from my step-by-step specs, ran the tests, and debugged against the live Ring sandbox and AWS. I set the scope and order of each step, reviewed the results, made the product and design calls, and did the hands-on parts (console setup, live clicks, credentials).
+- **Ring Appstore MCP server:** connected to the coding assistant, so every Ring endpoint detail came from Ring's docs rather than guesswork.
+
+**Inside the product:**
+- **YOLO-World:** open-vocabulary object detection (ultralytics), run locally on doorbell frames.
+- **Claude Haiku 4.5 on Amazon Bedrock:** scene descriptions and the agent brain, through the Strands Agents SDK. The code is complete; it's not live yet because my AWS account can't invoke Bedrock models.
+
+**Video:** the placeholder voiceover uses the macOS built-in `say` voice.
+
+### Q1. Which developer tools, APIs and SDKs did you use and for what?
+
+- **Ring APIs (Amazon Vision API):**
+  - **Device discovery:** `GET /v1/devices`.
+  - **WHEP live video:** a ~20 s capture per event.
+  - **Webhooks:** HMAC-signed events.
+  - **One-way account linking:** Token Exchange URL, nonce, App-Integrations POST/PATCH, refresh tokens.
+- **Ring Appstore MCP:** every API detail during development.
+- **Ring Playground:** the sandbox doorbell and its Package / Vehicle / Motion clips.
+- **Amazon Bedrock:** Claude Haiku 4.5 (Converse) for vision and the agent brain.
+- **Strands Agents SDK:** the agent loop with 8 tools and a rules fallback.
+- **Amazon DynamoDB:** state (events, packages, notifications, tokens).
+- **Amazon S3:** private snapshots with presigned URLs.
+- **Amazon SNS:** caregiver email alerts and the daily digest.
+- **AWS IAM:** a least-privilege user for the server.
+- **Also used:** FastAPI, aiortc (WebRTC), YOLO-World (ultralytics), OpenCV, React + Vite, Playwright + axe-core, pytest + moto, ngrok.
+
+### Q2. What worked well? / Q3. What needs work?
+
+Paste each tool's section from [PRODUCT_FEEDBACK.md](PRODUCT_FEEDBACK.md) (answers 2 and 3). If the box is short, these one-liners work:
+
+| Tool | Worked well | Needs work |
+|-|-|-|
+| Ring APIs | Precise docs for WHEP, webhook signing and linking; first device call worked first try | No documented package event; Token Exchange contract unspecified; one-way apps can't DELETE an integration (F5, F6, F11) |
+| Ring Appstore MCP | Exact, citable answers from the IDE; caught subtle rules (raw HMAC key, 60 s code window, mandatory PATCH) | Broad queries return nothing; no Playground coverage; IDE panel lacks Claude Code (F3) |
+| Ring Playground | Real device and live stream with no hardware; clips switch per button | No webhooks (F9); linking blocked without Ring Protect (F12); streams end early (F10); one device only (F4) |
+| Amazon Bedrock | Converse makes models swappable; availability API helped diagnose | Account-wide "Operation not allowed" with no actionable error; streaming needs an extra IAM action |
+| Strands Agents | Method tools, errors returned to the model, small `Model` interface easy to fake | `self` naming rule; wrapped exceptions; dependency clash with FastAPI |
+| DynamoDB | On-demand, moto tests | GSIs eventually consistent; Decimal/None handling |
+| S3 | Presigned URLs, simple hardening | Upload errors aren't `ClientError`; SigV4 opt-in |
+| SNS | One call to email; free tier | Silent until the subscription is confirmed |
+
+### Q4. Onboarding (zero to hello world), per tool
+
+- **Ring APIs:**
+  - **Fast:** credentials appear once at app creation; with a 30-minute sandbox token, `GET /v1/devices` returned the Playground Device on the first try, within the first hour.
+  - **Slowed by:** Getting Started saying a physical device is required (F1), and the private-app fields being easy to miss in the docs (F2).
+- **Ring Appstore MCP:** added to the IDE by hand (the console's "Connect your IDE" panel doesn't list it). The first real question (nonce validation) returned the exact doc with code.
+- **Ring Playground:**
+  - **Instant:** the device was there and streaming immediately.
+  - **Undocumented:** what the buttons do (switch clips, send no webhooks) had to be found by experiment.
+- **Amazon Bedrock:** never reached hello world. The code was ready early, but every model call fails at the account level (support case open). Diagnosing it took several CLI checks because the error was the same everywhere.
+- **Strands Agents:** `pip install`, and a scripted model driving two tools within minutes. The sticking points were the `self` naming rule and a Starlette/FastAPI version clash.
+- **DynamoDB / S3 / SNS:** one setup script created the table, bucket and topic on the first run. The only snags:
+  - **DynamoDB:** designing for consistency.
+  - **SNS:** confirming the email subscription before anything is delivered.
+
+### Q5. Would you build with these devices and services again?
+
+**Yes.**
+- **Ring:** the APIs themselves were clean and precisely documented. WHEP, webhook signing and account linking behaved exactly as specified, and the device list worked on the first call. What held us back was the sandbox (no webhooks, account linking blocked without a paid plan), not the API design. With those fixed, a second Ring app would be much faster.
+- **AWS:**
+  - **Strands:** made a well-tested agent with real guard rails possible even before Bedrock worked.
+  - **DynamoDB, S3, SNS:** gave production-style storage and alerts with no always-on infrastructure.
+  - **Bedrock:** I'd use it again once account access works.
+
+*(Per-tool answers for question 5: PRODUCT_FEEDBACK.md.)*
+
+### [Optional] Feature requests
+
+See "Feature requests" below (5 requests with priority).
+
+### [Optional] Friction log
+
+See "Friction log" below (link plus a 12-entry summary).
+
+### [Optional] Project testing link
+
+Leave blank: there's no hosted deployment. Judges run it from the repo (README → "Run it").
+
+### Open Source Mini Challenge (Contribution URL, Repository URL, GitHub username, description)
+
+**Leave blank: not entering.** That challenge needs a contribution to an existing open-source project, and DoorSight is a new project.
+
+### Are you submitting for the AWS Builder Mini Challenge?
+
+**Yes.**
+
+### AWS Builder: which AWS services did you incorporate and how?
+
+Paste "AWS Builder: AWS services used and how" below.
+
+### Province, if you reside in Canada
+
+**[YOU]** "N/A" unless you live in Canada.
+
+### Primary track(s)
+
+**Ring**
+
+### Code repository URL
+
+https://github.com/arnavgupta2004/RingCare
+
+**[YOU]** The repo is currently **private**. Either make it **public** (the MIT `LICENSE` then shows in the About section), or keep it private and share it with **testing@devpost.com** and **@AmazonAppDev**.
+
+### New or existing prior to August 31, 2026?
+
+**New.** The first commit is 6 October 2026 (the project skeleton), and everything was built during the submission period.
+
+### Upload a file (optional, ≤ 35 MB)
+
+Optional. A good choice is `video/demo_tts.mp4` (≈ 10 MB) as a backup copy of the demo video, or a zip of `docs/` (architecture, feedback, feature requests).
+
+### Submitter type / Organization / Country
+
+- **Submitter type:** **[YOU]** (likely "Individual")
+- **Organization:** "N/A" unless you represent one
+- **Country of residence:** **[YOU]**
+
+---
+
 ## Project name
 
 DoorSight
